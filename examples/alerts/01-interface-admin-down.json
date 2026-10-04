@@ -1,0 +1,222 @@
+{
+  "eventid": "90001",
+  "webhook_payload": {
+    "eventid": "90001",
+    "name": "Cisco IOS: Interface Gi0/1(): Link down",
+    "severity": "3",
+    "clock": "1791100800",
+    "hostid": "10001",
+    "host": "A1-viosl2"
+  },
+  "zabbix_context_text": "## 主机：A1-viosl2\n\n## 告警原文\n{\"eventid\": \"90001\", \"name\": \"Cisco IOS: Interface Gi0/1(): Link down\", \"severity\": \"3\", \"clock\": \"1791100800\", \"opdata\": \"\"}\n\n## 最近日志\nOct  4 08:00:01 A1 %LINK-5-CHANGED: Interface GigabitEthernet0/1, changed state to administratively down\nOct  4 08:00:02 A1 %LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/1, changed state to down\n",
+  "device_context_text": "### `show interfaces GigabitEthernet0/1`（AI 探路）\n\n```\nGigabitEthernet0/1 is administratively down, line protocol is down\n  Hardware is iGbE, address is aabb.cc00.0100 (bia aabb.cc00.0100)\n  0 input errors, 0 CRC, 0 frame, 0 overrun, 0 ignored\n  0 output errors, 0 collisions, 1 interface resets\n```\n",
+  "analysis_parsed": {
+    "headline": "接口被人为 shutdown",
+    "root_cause": "A1 的 GigabitEthernet0/1 被人为管理关闭（administratively down），不是链路或硬件故障。",
+    "confidence": "high",
+    "evidence": [
+      {
+        "claim": "日志显示接口状态变为 administratively down",
+        "source": "%LINK-5-CHANGED: Interface GigabitEthernet0/1, changed state to administratively down",
+        "source_from": "zabbix"
+      },
+      {
+        "claim": "设备上接口当前是 administratively down",
+        "source": "GigabitEthernet0/1 is administratively down, line protocol is down",
+        "source_from": "device"
+      }
+    ],
+    "ruled_out": [
+      {
+        "possibility": "链路质量问题",
+        "reason": "错误计数为 0。"
+      }
+    ],
+    "hypothesis_checklist": {
+      "local_action": {
+        "status": "supported",
+        "reason": "接口处于 administratively down，日志显示是被人为关闭。",
+        "counter_evidence": []
+      },
+      "local_hardware_or_resource": {
+        "status": "ruled_out",
+        "reason": "CPU 和内存正常。",
+        "counter_evidence": [
+          {
+            "claim": "接口是被软件关闭，不是硬件掉线",
+            "source": "GigabitEthernet0/1 is administratively down, line protocol is down",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "remote_or_upstream": {
+        "status": "ruled_out",
+        "reason": "对端接口状态正常。",
+        "counter_evidence": [
+          {
+            "claim": "本端日志已直接记录接口被管理关闭",
+            "source": "%LINK-5-CHANGED: Interface GigabitEthernet0/1, changed state to administratively down",
+            "source_from": "zabbix",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "link_or_path_quality": {
+        "status": "ruled_out",
+        "reason": "接口错误计数为 0。",
+        "counter_evidence": [
+          {
+            "claim": "接口错误计数为 0",
+            "source": "0 input errors, 0 CRC, 0 frame, 0 overrun, 0 ignored",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "management_plane_or_reachability": {
+        "status": "ruled_out",
+        "reason": "设备管理面可达，命令能正常登录执行。",
+        "counter_evidence": [
+          {
+            "claim": "能登录设备并取到接口状态",
+            "source": "GigabitEthernet0/1 is administratively down, line protocol is down",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "monitoring_or_collection_artifact": {
+        "status": "ruled_out",
+        "reason": "设备上取到的状态与监控一致，不是采集假象。",
+        "counter_evidence": [
+          {
+            "claim": "设备上读到的状态与监控告警一致",
+            "source": "GigabitEthernet0/1 is administratively down, line protocol is down",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      }
+    },
+    "alert_roles": [
+      {
+        "eventid": "90001",
+        "role": "root",
+        "reason": "接口被关闭是源头",
+        "caused_by_eventid": ""
+      }
+    ],
+    "grouping": [
+      {
+        "events": [
+          "90001"
+        ],
+        "why_same": "本次只有这一条告警，自成一组"
+      }
+    ],
+    "undistinguishable_candidates": []
+  },
+  "started_at": "2026-10-04T08:00:03+00:00",
+  "finished_at": "2026-10-04T08:00:41+00:00",
+  "alert_clock": 1791100800,
+  "status": "done",
+  "elapsed_seconds": {
+    "device_fetch": 21.4,
+    "analysis": 14.9,
+    "incident_save": 0.02,
+    "feishu_report": 0.6
+  },
+  "diagnostic_mode": "ai",
+  "zabbix_hostid": "10001",
+  "zabbix_fetch_error": "",
+  "device_fetch_error": "",
+  "analysis_error": "",
+  "device_commands_run": [
+    {
+      "source": "ai",
+      "command": "show interfaces GigabitEthernet0/1",
+      "allowed": true,
+      "ok": true,
+      "denial_reason": "",
+      "error": ""
+    }
+  ],
+  "diagnostic_trace": [
+    {
+      "source": "ai",
+      "tool": "sop_lookup",
+      "args": {},
+      "ok": true,
+      "error": ""
+    },
+    {
+      "source": "ai",
+      "tool": "device_show",
+      "args": {
+        "command": "show interfaces GigabitEthernet0/1"
+      },
+      "ok": true,
+      "error": ""
+    }
+  ],
+  "evidence_verification": {
+    "summary": {
+      "total": 2,
+      "verified": 2,
+      "unverified": 0,
+      "unverified_indices": [],
+      "grades": {
+        "verbatim": 2,
+        "cross_source": 0,
+        "reformatted": 0,
+        "fabricated": 0
+      },
+      "verbatim": 2,
+      "cross_source": 0,
+      "reformatted": 0,
+      "fabricated": 0
+    },
+    "details": [
+      {
+        "index": 0,
+        "verified": true,
+        "grade": "verbatim",
+        "source_from": "zabbix",
+        "reason": ""
+      },
+      {
+        "index": 1,
+        "verified": true,
+        "grade": "verbatim",
+        "source_from": "device",
+        "reason": ""
+      }
+    ]
+  },
+  "business_rule_violations": [],
+  "incident_id": "demo90001-1791100800",
+  "incident_fingerprint": "demo90001",
+  "incident_triggerids": [
+    "26001"
+  ],
+  "incident_objects": [],
+  "incident_role": "root",
+  "incident_grouped_with": [],
+  "incident_repeat_count": 1,
+  "feishu_report": {
+    "attempted": true,
+    "sent": true,
+    "error": "",
+    "transport": "webhook",
+    "eventids": [
+      "90001"
+    ]
+  },
+  "sop_usage": {}
+}

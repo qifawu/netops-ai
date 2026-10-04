@@ -1,0 +1,91 @@
+# Zabbix 7.0 LTS · 网工 AI 实验底座
+#
+# 跑在有 EVE-NG 的那台机器上，跟 EVE-NG 的设备在同一个可达网段。
+# 起停和验收见同目录 README.md。
+#
+# 版本选择：7.0 是 LTS，完整支持到 。7.4 是标准版，只有 6 个月完整支持。
+# 下一个 LTS 8.0 官方计划 2026 Q3，写这行时Docker Hub 上还没有 8.0 的 tag。
+# 教程要教读者带回企业内网，所以用 LTS。
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: zbx-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  zabbix-server:
+    image: zabbix/zabbix-server-pgsql:alpine-7.0-latest
+    container_name: zbx-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_SERVER_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      ZBX_STARTSNMPTRAPPER: "1"
+      # SNMP 轮询的并发。设备多了不够用会在日志里刷 "poller processes more than 75% busy"
+      ZBX_STARTPOLLERS: "5"
+      ZBX_STARTTRAPPERS: "5"
+    ports:
+      - "${ZBX_SERVER_PORT:-10051}:10051"
+    volumes:
+      - snmptraps:/var/lib/zabbix/snmptraps:ro
+      - ./export:/var/lib/zabbix/export
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-pgsql:alpine-7.0-latest
+    container_name: zbx-web
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - zabbix-server
+    environment:
+      ZBX_SERVER_HOST: zabbix-server
+      DB_SERVER_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PHP_TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${ZBX_WEB_PORT:-8080}:8080"
+
+  # 监控 Zabbix 自己这台主机。没有真设备时，靠它证明采集链路是通的
+  zabbix-agent:
+    image: zabbix/zabbix-agent2:alpine-7.0-latest
+    container_name: zbx-agent
+    restart: unless-stopped
+    depends_on:
+      - zabbix-server
+    environment:
+      ZBX_HOSTNAME: "Zabbix server"
+      ZBX_SERVER_HOST: zabbix-server
+    privileged: true
+    pid: host
+
+  # 收网络设备发来的 SNMP Trap。网络设备的接口 up/down 这类事件走这里
+  zabbix-snmptraps:
+    image: zabbix/zabbix-snmptraps:alpine-7.0-latest
+    container_name: zbx-snmptraps
+    restart: unless-stopped
+    ports:
+      - "${ZBX_TRAP_PORT:-162}:1162/udp"
+    volumes:
+      - snmptraps:/var/lib/zabbix/snmptraps:rw
+
+volumes:
+  pgdata:
+  snmptraps:

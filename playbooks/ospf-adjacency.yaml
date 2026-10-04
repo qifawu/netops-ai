@@ -1,0 +1,155 @@
+# OSPF 邻居 down 排查 SOP（网络工程师编写）
+#
+# ── 设计说明（YAML 注释不进 prompt，写多少都不花 token；why 字段才进，必须短）──
+#
+# 参考 Cisco 官方《Troubleshoot OSPF Neighbor Problems》的常见原因清单：
+# hello/dead 计时器不匹配、area 号不同、认证不匹配、network type 不匹配、
+# MTU 不匹配、router-id 重复、ACL 挡了 224.0.0.5、二层不通。
+#
+# 但本 SOP **不把这 8 条写进 why**。理由和日志过滤那次一样：枚举病因是列不完的，
+# 换个厂商、换个版本就漏。这里改成选对命令——
+#   `show ip ospf interface` 一条输出里就同时含
+#   area / hello / dead / network type / MTU / 认证 / router-id / 邻居数，
+#   8 条原因里 6 条都在这一条输出里。SOP 只负责保证这条输出进 prompt，
+#   比对由模型做。剩下两条（ACL、二层）由接口详情和邻居状态间接反映。
+#
+# ── 分支的意义 ──
+# 第 3 步是唯一真正分叉的地方：OSPF 接口本身已经 DOWN，说明根因在链路层，
+# 这时再去查 OSPF 参数就是查错方向。这正是"接口 down 连带弹出邻居 down"
+# 这类级联告警最容易被误判的点，也是 N6 验收要看的。
+#
+# ── 已知局限 ──
+# 1. 前接口名 GigabitEthernet0/1、对端检查的 device V1 都是写死的本 lab 实例值。
+#    现在 SOP 只写方向：接口详情和对端检查用告警上下文的 `{alert_interface}`
+#    （OSPF 告警名通常不带接口，渲染成 `<接口>`，由 agent 填上一步里 DOWN 的那个 OSPF 接口）；
+#    OSPF 参数用不带接口名的 `show ip ospf interface`（列出全部 OSPF 接口）；
+#    topology_neighbors 的 device 由 agent 按告警设备填。分支走向不变。
+#    `playbooks/lint.py` 的 instance-literal 会拦住再写死。
+# 2. 日志步骤（更新）：ai-readonly 现在是 privilege 5，`show logging` 能执行，
+#    旧写法 `| begin <时间前缀>` 在设备时钟对不上或窗口内没记录时返回空，改成按 OSPF 关键字过滤。
+#    Zabbix 侧的窗口日志走 zbx_syslog 工具，这里只看设备本地 buffer；命令失败仍走 error 分支继续。
+
+name: ospf-adjacency
+description: >
+  **只覆盖「邻接关系建不起来或掉了」这一类**：邻居 down、卡在
+  INIT/EXSTART/LOADING、认证不匹配、hello/dead 不一致。
+  骨架是确认日志 → 确认端口状态 → 确认 OSPF 配置；端口已 down 就直接
+  指向链路层，跳过协议参数检查。
+
+  **不覆盖**：路由不进表、次优路径、SPF 频繁计算、LSDB 异常增长、
+  area 设计问题——那些的排查路径和这条完全不同，该另开 SOP，
+  现在还没有，会落到 AI 自己探。
+applicability: "适用于 Cisco OSPF 邻接 down、卡在 INIT/EXSTART/LOADING 或认证类邻接异常；不适用于 OSPF 路由入表、选路、LSDB 或 area 设计问题。"
+limits:
+  max_main_steps: 5
+  max_tokens: 6000
+match:
+  # **标明厂商，因为下面的 action.command 是思科字面命令。**
+  # 不标的话，其它厂商的同类告警也会匹配上这条，然后每一步都被
+  # 设备白名单拒——匹配"成功"但一条都跑不了，比没匹配上更糟。
+  vendor: cisco
+  tags:
+    - tag: component
+      value: network
+  trigger_name_contains:
+    - "OSPF neighbor"
+    - "OSPF 邻居"
+    - "ospfNbrState"
+    - "OSPF adjacency"
+    - "OSPF 邻接"
+    - "OSPF authentication"
+start: check_ospf_log
+
+steps:
+  # ── 第一步：确认日志 ──
+  - id: check_ospf_log
+    why: "唯一带时间戳的证据源，后面几步看到的都是'现在'，说明不了故障时刻。设备本地 buffer 容量有限，故障窗口的记录可能已被覆盖；按 OSPF 关键字过滤后只回匹配行，没有匹配不等于没发生。"
+    expect: "看到 %OSPF-5-ADJCHG 的邻接变化记录（含原因，如 Dead timer expired、Interface down）；没有则继续看当前邻居状态。"
+    main: true
+    action:
+      tool: device
+      command: "show logging | include OSPF"
+    branches:
+      - when: "error"
+        goto: check_ospf_neighbor   # 取不到日志也要继续，不能第一步失败就中断
+      - when: default
+        goto: check_ospf_neighbor
+    provenance: {source: human, date: "2026-09-19"}
+
+  # ── 第二步：确认端口状态（告警只说邻居 down，不说哪条链路，所以先定位）──
+  - id: check_ospf_neighbor
+    why: "邻居状态即分诊：无表项=收不到 hello；INIT=单向；EXSTART/EXCHANGE=MTU 或 DBD；LOADING=LSA 请求。"
+    expect: "看到当前 OSPF 邻居表状态，用来判断邻接是否恢复或卡在哪个阶段。"
+    main: true
+    action:
+      tool: device
+      command: "show ip ospf neighbor"
+    branches:
+      - when: default
+        goto: check_ospf_interface_state
+    provenance: {source: human, date: "2026-09-19"}
+
+  - id: check_ospf_interface_state
+    why: "只列跑 OSPF 的接口，避免无关接口 down 干扰判断。"
+    expect: "看到运行 OSPF 的接口摘要状态，以区分链路层 down 和协议层问题。"
+    main: true
+    action:
+      tool: device
+      command: "show ip ospf interface brief"
+    branches:
+      - when: "output_contains('DOWN')"
+        goto: confirm_link_layer
+      - when: "output_contains('Down')"
+        goto: confirm_link_layer
+      - when: default
+        goto: check_peer_side
+    provenance: {source: human, date: "2026-09-19"}
+
+  - id: confirm_link_layer
+    why: "接口已 down，根因在链路层，不必再查 OSPF 参数。取接口详情看物理状态和错误计数；接口是上一步里 DOWN 的那个 OSPF 接口。"
+    expect: "看到接口物理/协议状态和错误计数，用来支撑链路层根因。"
+    main: false
+    action:
+      tool: device
+      command: "show interfaces {alert_interface}"
+    branches:
+      - when: default
+        goto: __ai__
+    provenance: {source: human, date: "2026-09-19"}
+
+  - id: check_peer_side
+    why: 本端接口是 up 的，邻居却掉了——这时对端嫌疑最大，先看对端那个口什么状态。device 填告警设备，接口是邻居掉了的那个 OSPF 接口。
+    expect: "看到对端拓扑口状态线索，判断邻接异常是否来自对端。"
+    main: true
+    action:
+      tool: topology_neighbors
+      interface: "{alert_interface}"
+    branches:
+      - when: default
+        goto: check_ospf_config
+    provenance: {source: human, date: "2026-09-20"}
+
+  # ── 第三步：确认 OSPF 配置（端口是好的，才轮到协议层）──
+  - id: check_ospf_config
+    why: "这一条输出含 area / hello / dead / network type / MTU / 认证，覆盖大部分邻居建不起来的原因。不带接口名会列出全部 OSPF 接口，看邻居掉了的那个。"
+    expect: "看到邻居掉了的那个接口的 OSPF 参数，包括 area、hello/dead、network type、MTU 和认证线索。"
+    main: true
+    action:
+      tool: device
+      command: "show ip ospf interface"
+    branches:
+      - when: default
+        goto: check_ospf_process
+    provenance: {source: human, date: "2026-09-19"}
+
+  - id: check_ospf_process
+    why: "读取整份 running-config，找 router ospf 那一段确认 router-id、network 范围、passive-interface；输出很长，一次就够。"
+    expect: "看到 running-config 中 OSPF 配置段，用来核对 router-id、network 和 passive-interface。"
+    main: false
+    action:
+      tool: device
+      command: "more system:running-config"
+    branches:
+      - when: default
+        goto: __ai__
+    provenance: {source: human, date: "2026-09-19"}

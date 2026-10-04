@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+/* **颜色按信息类型分工，不是按好看分。** 一个界面只有一种蓝的时候，
+   告警、证据、待审、正常长得一模一样，扫一眼分不出轻重。
+   下面七个语义色各自绑定一类信息，页面里不许拿它们当装饰用。 */
+@theme {
+  --color-page: #f4f6fb;
+  --color-card: #ffffff;
+  --color-line: #e4e9f2;
+  --color-ink: #0f172a;
+  --color-dim: #64748b;
+  --color-brand: #4f46e5;   /* AI / 智能体 */
+  --color-ok: #059669;      /* 正常 · 高置信 */
+  --color-warn: #d97706;    /* 待审 · 需人工 */
+  --color-bad: #e11d48;     /* 故障 · 低置信 */
+  --color-term: #0b1220;    /* 终端 / 原始回显 */
+}
+html {
+  font-family: "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+body { background: var(--color-page); color: var(--color-ink); }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+.card-shadow { box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 4px 16px -8px rgba(15,23,42,.08); }
+@keyframes pulse-dot { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.8); } }
+.pulse-dot { animation: pulse-dot 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .pulse-dot { animation: none; } }
+
+/* 原始回显一律用这个：深底等宽，跟浅色主区拉开层次，一眼知道"这是设备吐出来的原文"。 */
+.term {
+  background: var(--color-term);
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.term ::selection { background: #334155; }

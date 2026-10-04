@@ -1,0 +1,230 @@
+{
+  "eventid": "90003",
+  "webhook_payload": {
+    "eventid": "90003",
+    "name": "Cisco IOS: BGP neighbor 10.0.0.2 state is not Established",
+    "severity": "3",
+    "clock": "1791101000",
+    "hostid": "10003",
+    "host": "V1-vios"
+  },
+  "zabbix_context_text": "## 主机：V1-vios\n\n## 告警原文\n{\"eventid\": \"90003\", \"name\": \"Cisco IOS: BGP neighbor 10.0.0.2 state is not Established\", \"severity\": \"3\", \"clock\": \"1791101000\", \"opdata\": \"\"}\n",
+  "device_context_text": "### `show ip bgp summary`（AI 探路）\n\n```\nNeighbor        V           AS MsgRcvd MsgSent   TblVer  InQ OutQ Up/Down  State/PfxRcd\n10.0.0.2        4        65000       0       0        1    0    0 00:00:24 Idle (Admin)\n```\n",
+  "analysis_parsed": {
+    "headline": "BGP 邻居被管理员 shutdown",
+    "root_cause": "V1 上 BGP 邻居 10.0.0.2 被管理员 shutdown。",
+    "confidence": "high",
+    "evidence": [
+      {
+        "claim": "设备上邻居是 Idle (Admin)",
+        "source": "10.0.0.2        4        65000       0       0        1    0    0 00:00:24 Idle (Admin)",
+        "source_from": "device"
+      },
+      {
+        "claim": "日志里有管理员执行 neighbor shutdown 的记录",
+        "source": "%SYS-5-CONFIG_I: Configured from console by admin: neighbor 10.0.0.2 shutdown",
+        "source_from": "device"
+      }
+    ],
+    "ruled_out": [],
+    "hypothesis_checklist": {
+      "local_action": {
+        "status": "supported",
+        "reason": "邻居处于 Idle (Admin)。",
+        "counter_evidence": []
+      },
+      "local_hardware_or_resource": {
+        "status": "ruled_out",
+        "reason": "CPU 和内存正常。",
+        "counter_evidence": [
+          {
+            "claim": "设备在线、邻居表可读",
+            "source": "Neighbor        V           AS MsgRcvd MsgSent   TblVer  InQ OutQ Up/Down  State/PfxRcd",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "remote_or_upstream": {
+        "status": "cannot_determine",
+        "reason": "没有对端数据。",
+        "counter_evidence": []
+      },
+      "link_or_path_quality": {
+        "status": "ruled_out",
+        "reason": "接口错误计数为 0。",
+        "counter_evidence": [
+          {
+            "claim": "邻居没有收发过任何报文，不是链路质量劣化",
+            "source": "10.0.0.2        4        65000       0       0        1    0    0 00:00:24 Idle (Admin)",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "management_plane_or_reachability": {
+        "status": "ruled_out",
+        "reason": "设备管理面可达，命令能正常登录执行。",
+        "counter_evidence": [
+          {
+            "claim": "能登录设备并取到 BGP 汇总",
+            "source": "Neighbor        V           AS MsgRcvd MsgSent   TblVer  InQ OutQ Up/Down  State/PfxRcd",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "monitoring_or_collection_artifact": {
+        "status": "ruled_out",
+        "reason": "设备上取到的状态与监控一致，不是采集假象。",
+        "counter_evidence": [
+          {
+            "claim": "设备上读到的状态与监控告警一致",
+            "source": "10.0.0.2        4        65000       0       0        1    0    0 00:00:24 Idle (Admin)",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      }
+    },
+    "alert_roles": [
+      {
+        "eventid": "90003",
+        "role": "root",
+        "reason": "源头",
+        "caused_by_eventid": ""
+      }
+    ],
+    "grouping": [
+      {
+        "events": [
+          "90003"
+        ],
+        "why_same": "本次只有这一条告警，自成一组"
+      }
+    ],
+    "undistinguishable_candidates": []
+  },
+  "started_at": "2026-10-04T08:03:25+00:00",
+  "finished_at": "2026-10-04T08:04:12+00:00",
+  "alert_clock": 1791101000,
+  "status": "done",
+  "elapsed_seconds": {
+    "device_fetch": 21.4,
+    "analysis": 14.9,
+    "incident_save": 0.02,
+    "feishu_report": 0.6
+  },
+  "diagnostic_mode": "ai",
+  "zabbix_hostid": "10003",
+  "zabbix_fetch_error": "",
+  "device_fetch_error": "",
+  "analysis_error": "",
+  "device_commands_run": [
+    {
+      "source": "ai",
+      "command": "show ip bgp summary",
+      "allowed": true,
+      "ok": true,
+      "denial_reason": "",
+      "error": ""
+    },
+    {
+      "source": "ai",
+      "command": "clear ip bgp 10.0.0.2",
+      "allowed": false,
+      "ok": false,
+      "denial_reason": "命中禁令动词 'clear'",
+      "error": ""
+    }
+  ],
+  "diagnostic_trace": [
+    {
+      "source": "ai",
+      "tool": "sop_lookup",
+      "args": {},
+      "ok": true,
+      "error": ""
+    },
+    {
+      "source": "ai",
+      "tool": "device_show",
+      "args": {
+        "command": "show ip bgp summary"
+      },
+      "ok": true,
+      "error": ""
+    },
+    {
+      "source": "ai",
+      "tool": "device_show",
+      "args": {
+        "command": "show ip bgp summary"
+      },
+      "ok": true,
+      "error": ""
+    }
+  ],
+  "evidence_verification": {
+    "summary": {
+      "total": 2,
+      "verified": 1,
+      "unverified": 1,
+      "unverified_indices": [
+        1
+      ],
+      "grades": {
+        "verbatim": 1,
+        "cross_source": 0,
+        "reformatted": 0,
+        "fabricated": 1
+      },
+      "verbatim": 1,
+      "cross_source": 0,
+      "reformatted": 0,
+      "fabricated": 1
+    },
+    "details": [
+      {
+        "index": 0,
+        "verified": true,
+        "grade": "verbatim",
+        "source_from": "device",
+        "reason": ""
+      },
+      {
+        "index": 1,
+        "verified": false,
+        "grade": "fabricated",
+        "source_from": "device",
+        "reason": "这段引文在原文里找不到（可能掉字/改字/跨来源或跨上下文拼接）"
+      }
+    ]
+  },
+  "business_rule_violations": [
+    "还有 2 个方向没有被排除：本端有人动过配置、对端或上游。既然这些方向还分不出来，就必须把候选根因和还需要的数据说清楚。"
+  ],
+  "incident_id": "demo90003-1791101000",
+  "incident_fingerprint": "demo90003",
+  "incident_triggerids": [
+    "26003"
+  ],
+  "incident_objects": [],
+  "incident_role": "root",
+  "incident_grouped_with": [],
+  "incident_repeat_count": 1,
+  "feishu_report": {
+    "attempted": true,
+    "sent": true,
+    "error": "",
+    "transport": "webhook",
+    "eventids": [
+      "90003"
+    ]
+  },
+  "sop_usage": {}
+}

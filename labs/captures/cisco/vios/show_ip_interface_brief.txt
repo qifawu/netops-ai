@@ -1,0 +1,10 @@
+# 设备型号: Cisco IOSv (VIOS-ADVENTERPRISEK9-M)
+# 软件版本: 15.9(3)M9
+# 抓取时间: 2026-09-18 11:37 UTC（设备时钟）
+
+show ip interface brief
+Interface                  IP-Address      OK? Method Status                Protocol
+GigabitEthernet0/0         192.0.2.50       YES NVRAM  up                    up
+GigabitEthernet0/1         unassigned      YES NVRAM  administratively down down
+GigabitEthernet0/2         unassigned      YES NVRAM  administratively down down
+GigabitEthernet0/3         unassigned      YES NVRAM  administratively down down

@@ -1,0 +1,33 @@
+# **版本钉死。** 两台机器各装各的会装到不同版本，而 LangChain 1.x 还在快速变
+# （`create_agent` 的行为、工具调用细节都会变）——那等于在对照实验里偷偷多一个变量。
+# 改版本要两台一起改，并在实验日志里记一笔。Mac 侧基准：Python 3.13.3。
+#
+# 升级步骤：改这里 → 两台都 `.venv/bin/pip install -r requirements.txt` →
+# 各跑一遍全量测试 → 跑一条真实告警确认取证和研判都没变形。
+
+fastapi==0.141.1
+uvicorn==0.53.0
+pydantic==2.13.5
+
+# LangChain 只在 netops_ai/graph/ 和 netops_ai/llm/ 里 import。
+# langgraph 是 langchain 的依赖（`create_agent` 内部用它搭图），我们不直接 import，
+# 但版本一样要钉：循环行为就在它里面。
+langchain==1.4.2
+langchain-core==1.6.3
+langgraph==1.2.11
+langchain-openai==1.6.2
+langchain-google-genai==4.4.0
+langchain-anthropic==1.7.2
+
+paramiko==5.0.0
+PyYAML==6.0.3
+ruamel.yaml==0.19.1
+matplotlib==3.11.2
+tiktoken==0.14.0
+
+# 测试工具，不影响分析行为，不用两台严格对齐版本，但得装——
+# 2026-09-28 发现部分测试文件（test_api_settings.py 等）用了 pytest 专属特性
+# （fixture/monkeypatch），但这个包一直没进 requirements.txt，`.venv` 里装不到，
+# 官方测试命令 `unittest discover` 一遇到这些文件就整个模块 import 失败（报成
+# `_FailedTest`），而不是"这几个用例跳过"——之前一直没被这条命令本身捕捉到。
+pytest==9.1.1

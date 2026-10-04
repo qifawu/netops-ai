@@ -1,0 +1,9 @@
+# Routing Protocol Messages
+
+## OSPF neighbor change
+
+%OSPF-5-ADJCHG: Process 1, Nbr 10.0.0.2 on GigabitEthernet0/2 from FULL to DOWN, Neighbor Down: Dead timer expired
+
+Explanation: This sample message means the neighbor relationship changed state. A dead timer expiry points to missed hello packets, which can come from packet loss, interface problems, mismatched timers, or an overloaded peer.
+
+Recommended Action: Compare both sides of the adjacency, verify hello and dead timers, inspect link quality, and check whether routing updates stopped at the same time.

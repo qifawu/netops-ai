@@ -1,0 +1,152 @@
+# BGP peer down 排查 SOP（网络工程师编写）
+#
+# ── 设计说明（注释不进 prompt；why 字段才进，必须短）──
+#
+# 参考 Cisco《Troubleshoot BGP Neighborship Connection Issues》的常见原因：
+# 对端 IP 不可达、TCP 179 被 ACL/防火墙挡、AS 号配错、MD5 认证不匹配、
+# eBGP 缺 multihop 导致 TTL=1 被丢、neighbor 被 admin shutdown、
+# IdleHoldTimer 抑制重连。
+#
+# 同样不把这些写进 why。`show ip bgp neighbors` 一条输出里就含
+# 状态 / 本端与对端 AS / hold+keepalive / last reset reason / MD5 认证 /
+# ebgp-multihop TTL / TCP 连接状态 / 报文计数——清单里绝大部分都在这一条里。
+#
+# ── 和 OSPF SOP 的关键差别 ──
+# OSPF 邻居绑在某个接口上，所以第二步查"端口状态"。
+# BGP 是跑在 IP 可达性之上的 TCP 会话，**不绑接口**，走的是路由表。
+# 所以第二步改成查"到对端的路由还在不在"。
+#
+# 这一步也是本 SOP 唯一的真分叉，而且它正好指回级联链条：
+#   接口 down → OSPF 邻居 down → 路由丢失 → BGP peer down
+# 到对端的路由都没了，说明根因在下层（IGP 或接口），
+# 这时候去查 BGP 的 AS 号和认证就是查错方向。
+#
+# ── SOP 只写方向，不写实例值──
+# 原来这里写死了对端地址（show ip route / show ip bgp neighbors 后面跟一个 IP）和
+# check_peer_side 的 device/interface。写死的那个 IP 还是对端的管理口，不是 BGP 邻居地址。
+# 现在：到对端路由那一步写 `<对端地址>`，由 agent 从 check_bgp_summary 的输出里取
+# 状态不是 Established 的邻居地址填进去；邻居详情用不带地址的 `show ip bgp neighbors`（列出全部邻居）；
+# 对端检查只给 topology_neighbors 工具、device 由 agent 按告警设备填、不带 interface（列出这台的全部链路）。
+# 分支走向不变。`playbooks/lint.py` 的 instance-literal 会拦住再写死。
+
+name: bgp-session
+description: >
+  **只覆盖「会话建不起来或掉了」这一类**：peer down、卡在 Idle/Active、
+  AS 号或认证不匹配、缺 ebgp-multihop、被 admin shutdown。
+  骨架是确认日志 → 确认到对端的路由可达性 → 确认 BGP 会话参数；
+  路由已丢就指向 IGP/接口层，跳过 BGP 参数检查。
+
+  **不覆盖**：路由收不到/发不出、前缀数超限、路由震荡抑制、选路不符预期、
+  AS-Path/团体属性问题——那些是"会话是好的，但路由不对"，排查路径完全
+  不同，该另开 SOP，现在还没有。
+applicability: "适用于 Cisco BGP 会话 down、Idle/Active、邻居状态异常告警；不适用于 BGP 会话正常但路由前缀、选路或策略异常。"
+limits:
+  max_main_steps: 5
+  max_tokens: 6000
+match:
+  # **标明厂商，因为下面的 action.command 是思科字面命令。**
+  # 不标的话，其它厂商的同类告警也会匹配上这条，然后每一步都被
+  # 设备白名单拒——匹配"成功"但一条都跑不了，比没匹配上更糟。
+  vendor: cisco
+  tags:
+    - tag: component
+      value: network
+  trigger_name_contains:
+    - "BGP peer"
+    - "BGP 邻居"
+    - "BGP neighbor"
+    - "bgpPeerState"
+    - "BGP session"
+    - "BGP 会话"
+start: check_bgp_log
+
+steps:
+  # ── 第一步：确认日志 ──
+  - id: check_bgp_log
+    why: "唯一带时间戳的证据源。BGP 掉线日志通常直接写明 reset reason。设备本地 buffer 容量有限，故障窗口的记录可能已被覆盖；按 BGP 关键字过滤后只回匹配行，没有匹配不等于没发生。"
+    expect: "看到 %BGP-5-ADJCHANGE 或 %BGP-3-NOTIFICATION 的邻居状态变化记录（含原因）；没有则继续看当前会话状态。"
+    main: true
+    action:
+      tool: device
+      command: "show logging | include BGP"
+    branches:
+      - when: "error"
+        goto: check_bgp_summary
+      - when: default
+        goto: check_bgp_summary
+    provenance: {source: human, date: "2026-09-19"}
+
+  # ── 第二步：确认到对端的可达性（BGP 不绑接口，走路由）──
+  - id: check_bgp_summary
+    why: "会话状态即分诊：Idle=路由不可达/被 shutdown/IdleHold 抑制；Active=TCP 建不起来（179 被挡、AS 号错、认证不匹配）。"
+    expect: "看到 BGP summary 中邻居当前状态、收发计数和是否仍处于 Idle/Active。"
+    main: true
+    action:
+      tool: device
+      command: "show ip bgp summary"
+    branches:
+      - when: default
+        goto: check_peer_reachability
+    provenance: {source: human, date: "2026-09-19"}
+
+  - id: check_peer_reachability
+    why: "BGP 是跑在路由之上的 TCP 会话。到对端的路由没了，BGP 必然掉，此时根因不在 BGP。对端地址取上一步 BGP summary 里状态不是 Established 的那个邻居。"
+    expect: "看到到该 BGP 邻居地址的路由是否存在，用来判断是否先转向下层故障。"
+    main: true
+    action:
+      tool: device
+      command: "show ip route <对端地址>"
+    branches:
+      - when: "output_contains('not in table')"
+        goto: confirm_underlay
+      - when: default
+        goto: check_bgp_neighbor_detail
+    provenance: {source: human, date: "2026-09-19"}
+
+  - id: confirm_underlay
+    why: "到对端的路由已丢，根因在下层。查 IGP 邻居，确认是 OSPF 掉了还是接口掉了，不必再查 BGP 参数。"
+    expect: "看到 OSPF 邻居是否异常，确认 BGP down 是否由 IGP 或接口层级联导致。"
+    main: false
+    action:
+      tool: device
+      command: "show ip ospf neighbor"
+    branches:
+      - when: default
+        goto: __ai__
+    provenance: {source: human, date: "2026-09-19"}
+
+  # ── 第三步：确认 BGP 会话参数（路由通着，才轮到 BGP 自己）──
+  - id: check_bgp_neighbor_detail
+    why: "这一条输出含状态 / 双方 AS / hold+keepalive / last reset reason / MD5 认证 / multihop TTL，覆盖大部分建不起来的原因。不带地址会列出全部邻居，看掉线的那个。"
+    expect: "看到掉线邻居的详细状态、last reset reason、AS、计时器、认证和 multihop 等参数。"
+    main: true
+    action:
+      tool: device
+      command: "show ip bgp neighbors"
+    branches:
+      - when: default
+        goto: check_peer_side
+    provenance: {source: human, date: "2026-09-19"}
+
+  - id: check_peer_side
+    why: 本端到对端路由还在，BGP 却掉了——这时对端嫌疑最大，先看对端那个口什么状态。device 填告警设备；不带接口会列出这台的全部链路，看通往该 BGP 邻居的那条。
+    expect: "看到对端拓扑口状态线索，判断问题是否更可能在对端侧。"
+    main: true
+    action:
+      tool: topology_neighbors
+    branches:
+      - when: default
+        goto: check_bgp_config
+    provenance: {source: human, date: "2026-09-19"}
+
+  - id: check_bgp_config
+    why: "读取整份 running-config，找 router bgp 那一段确认 neighbor 是否 shutdown、network/redistribute、peer-group；输出很长，一次就够。"
+    expect: "看到 running-config 中 BGP 配置段，用来核对 neighbor 是否 shutdown 或参数不一致。"
+    main: false
+    action:
+      tool: device
+      command: "more system:running-config"
+    branches:
+      - when: default
+        goto: __ai__
+    provenance: {source: human, date: "2026-09-19"}

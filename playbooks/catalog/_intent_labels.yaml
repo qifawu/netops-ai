@@ -1,0 +1,37 @@
+# 意图的中文标签，只给 SOP 表单的「查什么」下拉用。
+# 文件名以下划线开头：catalog.load_catalog() 会跳过它，不会被当成某个厂商的命令目录，
+# 所以不改变各个命令目录（如 cisco_ios.yaml）的结构。
+# 新增意图时，在这里补一行 label（缺了表单里会退回显示意图英文名，并有测试提醒）。
+intents:
+  interface_state:
+    label: 接口当前状态
+  interface_counters:
+    label: 接口错误计数与流量统计
+  interface_neighbor:
+    label: 接口对端（邻居）信息
+  interface_logs:
+    label: 接口相关日志（告警时间窗）
+  interface_errdisable:
+    label: 接口是否被保护机制禁用
+  interface_stp:
+    label: 接口生成树（STP）状态
+  device_uptime:
+    label: 设备运行时间 / 重启线索
+  device_clock:
+    label: 设备当前时间
+  device_recent_config_events:
+    label: 近期配置变更记录
+  device_logs_window:
+    label: 设备日志（告警时间窗）
+  device_interfaces_overview:
+    label: 三层接口总览
+  device_protocols_overview:
+    label: 动态路由协议总览
+  ospf_neighbors:
+    label: OSPF 邻居状态
+  ospf_interfaces:
+    label: OSPF 接口参数（区域 / 计时器）
+  bgp_summary:
+    label: BGP 邻居概况
+  bgp_neighbors:
+    label: BGP 邻居详情

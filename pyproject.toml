@@ -1,0 +1,21 @@
+[project]
+name = "netops-ai"
+version = "0.1.0"
+description = "Alert-driven, read-only AI network troubleshooting (告警驱动的只读 AI 网络排障)"
+readme = "README.md"
+requires-python = ">=3.13"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+include = ["netops_ai*", "tools*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+# 先只开这几类，不是一上来就全量 lint 把仓库刷红。
+select = ["F", "E4", "E7", "E9", "I", "UP"]

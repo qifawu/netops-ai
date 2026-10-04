@@ -1,0 +1,66 @@
+os_family: cisco_ios
+intents:
+  interface_state:
+    command: "show interfaces {interface}"
+    parser: null
+    note: "接口状态、物理/协议状态与基础错误计数。"
+  interface_counters:
+    command: "show interfaces {interface}"
+    parser: null
+    note: "接口错误计数、载波变化和收发统计。"
+  interface_neighbor:
+    command: "show cdp neighbors {interface}"
+    parser: null
+    note: "优先读取 CDP 对端；无 CDP 时由上层判断是否需要 LLDP。"
+  interface_logs:
+    command: "show logging | begin {alert_log_prefix}"
+    parser: null
+    note: "从告警时间窗附近读取设备日志。"
+  device_uptime:
+    command: "show version | include uptime|reload|System image"
+    parser: null
+    note: "确认设备 uptime 与 reload 线索。"
+  device_clock:
+    command: "show clock"
+    parser: null
+    note: "确认设备当前时间，用于对齐告警窗口。"
+  device_recent_config_events:
+    command: "show logging | include CONFIG_I"
+    parser: null
+    note: "查看近期配置变更日志事件。"
+  device_logs_window:
+    command: "show logging | begin {alert_log_prefix}"
+    parser: null
+    note: "从告警时间窗附近读取设备日志；与 interface_logs 使用同一模板。"
+  device_interfaces_overview:
+    command: "show ip interface brief"
+    parser: null
+    note: "查看三层接口地址与 up/down 总览。"
+  device_protocols_overview:
+    command: "show ip protocols | include Routing Protocol|Neighbor"
+    parser: null
+    note: "查看动态路由协议与邻居相关摘要。"
+  interface_errdisable:
+    command: "show interfaces status err-disabled"
+    parser: null
+    note: "检查交换机端口是否因保护机制进入 err-disabled。"
+  interface_stp:
+    command: "show spanning-tree interface {interface}"
+    parser: null
+    note: "检查接口在 STP 中的状态和保护原因。"
+  ospf_neighbors:
+    command: "show ip ospf neighbor"
+    parser: null
+    note: "查看 OSPF 邻居及其状态（FULL/2WAY/EXSTART/DOWN 等）。"
+  ospf_interfaces:
+    command: "show ip ospf interface | include line protocol|Timer intervals|Network Type|Neighbor Count|Process ID"
+    parser: null
+    note: "查看各 OSPF 接口的区域、网络类型、Hello/Dead 计时器、认证、邻居数（计时器/区域/类型不一致的直接证据）。"
+  bgp_summary:
+    command: "show ip bgp summary"
+    parser: null
+    note: "查看 BGP 邻居状态、AS 号和收到的前缀数。"
+  bgp_neighbors:
+    command: "show ip bgp neighbors"
+    parser: null
+    note: "查看 BGP 邻居详情（状态、最近一次重置原因、是否被 administratively shutdown、认证等）。"

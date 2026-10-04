@@ -1,0 +1,27 @@
+# 巡检配置（netops_ai/inspection/config.py 读这个文件）。
+# 没有这个文件时用 detectors.py 里的默认值；可以在巡检页的表单里改，也可以直接改这个文件。
+# detectors 缺省的参数用默认值；scope 里的模式用 * ? 通配、不分大小写；
+# ignore 由巡检页的“这条不用管”按钮维护。
+detectors:
+  trend:
+    min_points: 6
+    min_time_span_seconds: 43200
+    monotonic_fraction_threshold: 0.7
+    min_relative_change: 0.2
+  periodic_spike:
+    min_points: 6
+    min_time_span_seconds: 172800
+    min_distinct_days: 2
+    spike_ratio_threshold: 1.5
+  self_healing_flap:
+    down_value: 2
+    up_value: 1
+    min_flaps: 2
+    max_recovery_seconds: 3600
+scope:
+  include_hosts: []
+  exclude_hosts: []
+  include_item_keys: []
+  exclude_item_keys: []
+  lookback_days: 7
+ignore: []

@@ -1,0 +1,24 @@
+# secrets and local state
+.env
+.env.*
+!env.example
+*.pem
+*.key
+
+# runtime output
+records/
+config-snapshots/
+*.db
+*.db-*
+__pycache__/
+*.pyc
+
+# python
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# web
+web/node_modules/
+web/dist/

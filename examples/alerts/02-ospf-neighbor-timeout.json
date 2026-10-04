@@ -1,0 +1,261 @@
+{
+  "eventid": "90002",
+  "webhook_payload": {
+    "eventid": "90002",
+    "name": "Cisco IOS: OSPF neighbor 10.0.1.18 is down",
+    "severity": "3",
+    "clock": "1791100900",
+    "hostid": "10002",
+    "host": "D1-vios"
+  },
+  "zabbix_context_text": "## 主机：D1-vios\n\n## 告警原文\n{\"eventid\": \"90002\", \"name\": \"Cisco IOS: OSPF neighbor 10.0.1.18 is down\", \"severity\": \"3\", \"clock\": \"1791100900\", \"opdata\": \"\"}\n\n## 最近日志\nOct  4 08:01:40 D1 %OSPF-5-ADJCHG: Process 1, Nbr 4.4.4.4 on GigabitEthernet0/3 from FULL to DOWN, Neighbor Down: Dead timer expired\n",
+  "device_context_text": "### `show ip ospf neighbor`（AI 探路）\n\n```\nNeighbor ID     Pri   State           Dead Time   Address         Interface\n2.2.2.2           0   FULL/  -        00:00:32    10.0.1.9        GigabitEthernet0/2\n1.1.1.1           0   FULL/  -        00:00:37    10.0.1.1        GigabitEthernet0/1\n```\n\n### `show ip interface brief`（AI 探路）\n\n```\nGigabitEthernet0/3         10.0.1.17       YES NVRAM  up                    up\n```\n\n### `show processes cpu`（AI 探路）\n\n```\nCPU utilization for five seconds: 2%/0%; one minute: 1%; five minutes: 1%\n```\n",
+  "analysis_parsed": {
+    "headline": "OSPF 邻居超时，判不出是哪一侧的问题",
+    "root_cause": "D1 与 4.4.4.4 的 OSPF 邻居因 Dead timer 超时断开；D1 本端接口是 up/up，原因在对端或中间路径，需要看对端设备。",
+    "confidence": "low",
+    "evidence": [
+      {
+        "claim": "日志显示邻居 4.4.4.4 因 Dead timer 超时从 FULL 变为 DOWN",
+        "source": "Nbr 4.4.4.4 on GigabitEthernet0/3 from FULL to DOWN, Neighbor Down: Dead timer expired",
+        "source_from": "zabbix"
+      },
+      {
+        "claim": "本端 Gi0/3 接口状态 up/up",
+        "source": "GigabitEthernet0/3         10.0.1.17       YES NVRAM  up                    up",
+        "source_from": "device"
+      }
+    ],
+    "ruled_out": [],
+    "hypothesis_checklist": {
+      "local_action": {
+        "status": "cannot_determine",
+        "reason": "本端接口是 up/up，没有人为操作的日志，无法排除对端被操作。",
+        "counter_evidence": []
+      },
+      "local_hardware_or_resource": {
+        "status": "ruled_out",
+        "reason": "CPU 和内存正常。",
+        "counter_evidence": [
+          {
+            "claim": "CPU 利用率低",
+            "source": "CPU utilization for five seconds: 2%/0%; one minute: 1%; five minutes: 1%",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "remote_or_upstream": {
+        "status": "cannot_determine",
+        "reason": "邻居 4.4.4.4 从列表里消失，只靠 D1 一侧的数据看不到对端状态。",
+        "counter_evidence": []
+      },
+      "link_or_path_quality": {
+        "status": "ruled_out",
+        "reason": "接口错误计数为 0。",
+        "counter_evidence": [
+          {
+            "claim": "本端接口 up/up",
+            "source": "GigabitEthernet0/3         10.0.1.17       YES NVRAM  up                    up",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "management_plane_or_reachability": {
+        "status": "ruled_out",
+        "reason": "设备管理面可达，命令能正常登录执行。",
+        "counter_evidence": [
+          {
+            "claim": "能登录设备并取到邻居表",
+            "source": "2.2.2.2           0   FULL/  -        00:00:32    10.0.1.9        GigabitEthernet0/2",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "monitoring_or_collection_artifact": {
+        "status": "ruled_out",
+        "reason": "设备上取到的状态与监控一致，不是采集假象。",
+        "counter_evidence": [
+          {
+            "claim": "设备上的邻居表也只剩两个邻居，跟告警一致",
+            "source": "1.1.1.1           0   FULL/  -        00:00:37    10.0.1.1        GigabitEthernet0/1",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      }
+    },
+    "alert_roles": [
+      {
+        "eventid": "90002",
+        "role": "root",
+        "reason": "目前能看到的最上游",
+        "caused_by_eventid": ""
+      }
+    ],
+    "grouping": [
+      {
+        "events": [
+          "90002"
+        ],
+        "why_same": "本次只有这一条告警，自成一组"
+      }
+    ],
+    "undistinguishable_candidates": [
+      {
+        "candidates": [
+          "本端有人动过邻居相关配置",
+          "对端设备故障或被操作"
+        ],
+        "why_indistinguishable": "本端接口 up/up、日志里没有人为操作记录，但邻居是超时消失的——只看 D1 一侧，分不出是对端的问题还是本端配置。",
+        "what_data_would_help": "对端 4.4.4.4 的邻居表和接口状态，以及本端最近的配置变更记录",
+        "how_to_get_it": "登录 4.4.4.4 执行 `show ip ospf neighbor` 和 `show ip interface brief`；本端执行 `show logging | include CONFIG_I`",
+        "who": "智能体可继续取证"
+      }
+    ]
+  },
+  "started_at": "2026-10-04T08:01:45+00:00",
+  "finished_at": "2026-10-04T08:02:31+00:00",
+  "alert_clock": 1791100900,
+  "status": "done",
+  "elapsed_seconds": {
+    "device_fetch": 21.4,
+    "analysis": 14.9,
+    "incident_save": 0.02,
+    "feishu_report": 0.6
+  },
+  "diagnostic_mode": "ai",
+  "zabbix_hostid": "10002",
+  "zabbix_fetch_error": "",
+  "device_fetch_error": "",
+  "analysis_error": "",
+  "device_commands_run": [
+    {
+      "source": "ai",
+      "command": "show ip ospf neighbor",
+      "allowed": true,
+      "ok": true,
+      "denial_reason": "",
+      "error": ""
+    },
+    {
+      "source": "ai",
+      "command": "show ip interface brief",
+      "allowed": true,
+      "ok": true,
+      "denial_reason": "",
+      "error": ""
+    },
+    {
+      "source": "ai",
+      "command": "show processes cpu",
+      "allowed": true,
+      "ok": true,
+      "denial_reason": "",
+      "error": ""
+    }
+  ],
+  "diagnostic_trace": [
+    {
+      "source": "ai",
+      "tool": "sop_lookup",
+      "args": {},
+      "ok": true,
+      "error": ""
+    },
+    {
+      "source": "ai",
+      "tool": "device_show",
+      "args": {
+        "command": "show ip ospf neighbor"
+      },
+      "ok": true,
+      "error": ""
+    },
+    {
+      "source": "ai",
+      "tool": "device_show",
+      "args": {
+        "command": "show ip ospf neighbor"
+      },
+      "ok": true,
+      "error": ""
+    },
+    {
+      "source": "ai",
+      "tool": "device_show",
+      "args": {
+        "command": "show ip ospf neighbor"
+      },
+      "ok": true,
+      "error": ""
+    },
+    {
+      "source": "ai",
+      "tool": "zbx_syslog",
+      "args": {},
+      "ok": true,
+      "error": ""
+    }
+  ],
+  "evidence_verification": {
+    "summary": {
+      "total": 2,
+      "verified": 2,
+      "unverified": 0,
+      "unverified_indices": [],
+      "grades": {
+        "verbatim": 2,
+        "cross_source": 0,
+        "reformatted": 0,
+        "fabricated": 0
+      },
+      "verbatim": 2,
+      "cross_source": 0,
+      "reformatted": 0,
+      "fabricated": 0
+    },
+    "details": [
+      {
+        "index": 0,
+        "verified": true,
+        "grade": "verbatim",
+        "source_from": "zabbix",
+        "reason": ""
+      },
+      {
+        "index": 1,
+        "verified": true,
+        "grade": "verbatim",
+        "source_from": "device",
+        "reason": ""
+      }
+    ]
+  },
+  "business_rule_violations": [],
+  "incident_id": "demo90002-1791100900",
+  "incident_fingerprint": "demo90002",
+  "incident_triggerids": [
+    "26002"
+  ],
+  "incident_objects": [],
+  "incident_role": "root",
+  "incident_grouped_with": [],
+  "incident_repeat_count": 1,
+  "feishu_report": {
+    "attempted": true,
+    "sent": true,
+    "error": "",
+    "transport": "webhook",
+    "eventids": [
+      "90002"
+    ]
+  },
+  "sop_usage": {}
+}

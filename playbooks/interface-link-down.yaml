@@ -1,0 +1,168 @@
+# Interface link down SOP.
+#
+# Sources used for this human-review draft:
+# - Cisco, "Troubleshoot Port Flaps on Catalyst 9000":
+#   https://www.cisco.com/c/en/us/support/docs/switches/catalyst-9500-series-switches/218397-troubleshoot-port-flaps-on-catalyst-9000.html
+# - Cisco, "Troubleshoot Interface Down or Flap Issues on NCS":
+#   https://www.cisco.com/c/en/us/support/docs/routers/network-convergence-system-5500-series/220452-troubleshoot-interface-down-or-flap-issu.html
+# - Cisco, "Troubleshoot Switch Port and Interface Problems":
+#   https://www.cisco.com/c/en/us/support/docs/switches/catalyst-6500-series-switches/12027-53.html
+# - General flap guidance from Netdata/F5/Obkio: flap frequency drives severity;
+#   L1 failures are usually visible from both ends; speed/duplex mismatches and
+#   protection features are common preventable causes.
+
+name: interface-link-down
+description: >
+  思科接口 Link down SOP。覆盖告警名能定位到具体接口的接口级 down/抖动告警，
+  决策树区分本端 admin shutdown、down/down 物理或对端故障、up/down L2/保护类
+  问题、以及已经自愈的瞬时抖动这几类。
+applicability: "适用于 Cisco 接口 link down、linkDown trap、line protocol down 告警，且告警能定位到接口；不适用于纯设备不可达或非接口级协议故障。"
+limits:
+  max_main_steps: 5
+  max_tokens: 6000
+match:
+  vendor: cisco
+  # 不再要求 tag component=network：Trap（`Trap: linkDown received on …`）和 Syslog（`Syslog: Interface … line protocol down`）
+  # 两类告警源没有这个 tag，之前 真机 5 轮里 SOP 基本没命中（命中率 1/5），根因就在这。
+  trigger_name_contains:
+    - Link down
+    - linkDown
+    - line protocol down
+start: triage_interface
+
+steps:
+  - id: triage_interface
+    why: "一条命令先回答接口当前属于 administratively down、down/down、up/down 还是 up/up 已恢复；同屏读取速率/双工、CRC/input errors/runts/giants/collisions/late collision、carrier transitions、Last input/output 和 resets。若状态已足够说明本端 shutdown 或已恢复抖动，就不要继续扫无关命令。"
+    expect: "看到接口当前物理/协议状态、错误计数和 flap 线索，并据此进入对应分支。"
+    main: true
+    action:
+      tool: device
+      command: "show interfaces {alert_interface}"
+    branches:
+      - when: "output_contains('administratively down')"
+        goto: local_shutdown_evidence
+      - when: "output_contains('is up, line protocol is down')"
+        goto: l2_peer_check
+      - when: "output_contains('is down, line protocol is down')"
+        goto: physical_peer
+      - when: "output_contains('is up, line protocol is up')"
+        goto: flap_history
+      - when: default
+        goto: __ai__
+    provenance: {source: ai_proposed_human_approved, date: "2026-09-25"}
+
+  # 原来这一步写的是 `tool: zabbix_history` + `key_contains: syslog`，渲染出来是
+  # `tool=zbx_history; command=syslog`——zbx_history 要的是 item_id，没有这个参数（外部 agent 反馈第 1 条）。
+  # 取 Zabbix 侧故障窗口日志的真实工具是 zbx_syslog；Zabbix 没收到日志时再看设备本地 buffer（local_log_buffer）。
+  - id: local_shutdown_evidence
+    why: "admin down 是本端的配置状态，这一分支回答谁、什么时候、怎么关的。取 Zabbix 收到的故障窗口 syslog（host 填告警设备），看有没有 %SYS-5-CONFIG_I 和 %LINK-5-CHANGED ... administratively down。对端状态不改变“本端被关闭”这一结论，只关乎影响面。"
+    expect: "看到同窗口的配置变更或 administratively down 日志，用来支撑本端人为关闭的判断。"
+    main: true
+    action:
+      tool: zbx_syslog
+      since: "{alert_window_from}"
+      until: "{alert_window_to}"
+    branches:
+      - when: "output_contains('%SYS-5-CONFIG_I')"
+        goto: __end__
+      - when: "output_contains('administratively down')"
+        goto: __end__
+      - when: error
+        goto: local_log_buffer
+      - when: default
+        goto: local_log_buffer
+    provenance: {source: ai_proposed_human_approved, date: "2026-09-26"}
+
+  # 原来只有 default→__ai__，运行时提示又会把它指回 local_shutdown_evidence（验证 外部 agent 反馈第 1 条）；
+  # 找到 CONFIG_I 就是 local_shutdown_evidence 要的那条证据，SOP 在这里走完。
+  - id: local_log_buffer
+    why: "Zabbix 侧没有这台在故障窗口的配置变更日志时，看设备本地日志 buffer 里是否还留着 CONFIG_I 或该接口的状态变化。buffer 容量有限，登录本身也会写日志，故障窗口的记录可能已被覆盖；不带过滤的 show logging 常超过工具单次返回上限（8000 字符），超出部分被截掉，截断时返回的是开头一段（含 logging 配置头部）；带 | include 时设备只回匹配行。两处都没有时，写明查不到操作人，下一步是 AAA/console 审计和变更记录。"
+    expect: "看到设备 buffer 里的 %SYS-5-CONFIG_I 或该接口的 up/down 记录；没有则保留审计缺口。"
+    main: false
+    action:
+      tool: device
+      command: "show logging | include CONFIG_I|{alert_interface}"
+    branches:
+      - when: "output_contains('%SYS-5-CONFIG_I')"
+        goto: __end__
+      - when: error
+        goto: __ai__
+      - when: default
+        goto: __ai__
+    provenance: {source: ai_proposed_human_approved, date: "2026-09-26"}
+
+  - id: physical_peer
+    why: "down/down 的核心是看对端：用拓扑找到本端口的对端设备和对端口，再判断对端口是不是 admin down/down。只有本端 down 且对端 administratively down，优先判定对端有人关；两端都 down，怀疑线缆/链路/两端同时问题；对端未纳管则只能说本端收不到信号。carrier transitions 高且 CRC/FCS/input errors 高指向线缆、光模块或网卡；计数器稳定则更像对端/终端问题。真机可补 TDR/DOM/环回，虚拟设备和当前白名单不把这些放进 action。"
+    expect: "看到本端口的拓扑邻居和对端口状态线索，用于区分对端关闭、线路问题或未纳管对端。"
+    main: true
+    action:
+      tool: topology_neighbors
+      interface: "{alert_interface}"
+    branches:
+      - when: default
+        goto: __ai__
+    provenance: {source: ai_proposed_human_approved, date: "2026-09-25"}
+
+  - id: l2_peer_check
+    why: "up/down 说明物理载波还在但二层协议不通。先看该接口是否还能收到 CDP 邻居；若 CDP 还在，对端存活，重点比对封装/keepalive/一端异常。若 CDP 消失，再结合下一步 err-disabled/STP 判断是否被二层保护机制或 STP 拦住。"
+    expect: "看到该接口是否仍有 CDP 邻居，以判断对端是否在线和二层是否可见。"
+    main: true
+    action:
+      tool: device
+      command: "show cdp neighbors {alert_interface}"
+    branches:
+      - when: default
+        goto: l2_errdisabled_check
+    provenance: {source: ai_proposed_human_approved, date: "2026-09-25"}
+
+  - id: l2_errdisabled_check
+    why: "交换机端口 up/down 时要排除 err-disabled；若输出含 port-security、bpduguard、udld、link-flap、loopback 等原因，结论必须点名保护机制。非交换机或不支持该命令时容错，继续看 STP。"
+    expect: "看到接口是否处于 err-disabled 以及可能的保护机制原因。"
+    main: false
+    action:
+      tool: device
+      command: "show interfaces status err-disabled"
+    branches:
+      - when: "output_contains('err-disabled')"
+        goto: __ai__
+      - when: default
+        goto: l2_stp_check
+    provenance: {source: ai_proposed_human_approved, date: "2026-09-25"}
+
+  - id: l2_stp_check
+    why: "仅二层设备适用：确认接口在 STP 中是否 blocking/errdisable/inconsistent。若命令报错或没有 STP 信息，就把封装/keepalive、对端单向异常列为剩余缺口。"
+    expect: "看到 STP 对该接口的状态；若无结果，则保留二层封装或对端异常缺口。"
+    main: false
+    action:
+      tool: device
+      command: "show spanning-tree interface {alert_interface}"
+    branches:
+      - when: default
+        goto: __ai__
+    provenance: {source: ai_proposed_human_approved, date: "2026-09-25"}
+
+  - id: flap_history
+    why: "当前 up/up 时只追溯抖动历史：由模型看日志自带的时间戳，统计告警窗口前后翻了几次，是否有 %LINEPROTO-5-UPDOWN 与 %LINK-3-UPDOWN 交替。高频 flap 先止血再查；很快恢复的单次事件说明瞬时抖动和证据即可。若同窗口有多接口同时 down 或 %SYS-5-RESTART，再查整机重启。（2026-09-27 改为按关键词过滤：设备时钟带 * 未同步时，按时间前缀 begin 常在窗口内查不到，见 ospf-adjacency/bgp-session 同类修法；模型自己按行内时间判断哪几条落在故障窗口内。）"
+    expect: "看到该接口的 up/down 日志（不一定只有窗口内的，模型按日志自带时间戳判断哪些属于这次故障）和是否伴随设备级重启线索。"
+    main: true
+    action:
+      tool: device
+      command: "show logging | include LINEPROTO-5-UPDOWN|LINK-3-UPDOWN|SYS-5-RESTART"
+    branches:
+      - when: "output_contains('%SYS-5-RESTART')"
+        goto: device_level_check
+      - when: default
+        goto: __ai__
+    provenance: {source: ai_proposed_human_approved, date: "2026-09-25"}
+
+  - id: device_level_check
+    why: "仅在同设备多个接口同时 down 或日志出现重启迹象时使用。uptime 可排除整机重启或 reload 造成的级联接口告警；若 uptime 与告警时间匹配，先按设备级事件收敛。"
+    expect: "看到设备 uptime 是否与告警时间吻合，以确认或排除 reload 级联影响。"
+    main: false
+    action:
+      tool: device
+      command: "show version | include uptime"
+    branches:
+      - when: default
+        goto: __ai__
+    provenance: {source: ai_proposed_human_approved, date: "2026-09-25"}
