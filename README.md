@@ -22,6 +22,31 @@
 
 **It never changes anything.** Every device command passes a whitelist in code (only full `show …` commands), and you also give it a read-only device account. A refused command is never sent.
 
+## How it works
+
+- **Merge.** Alerts that arrive close together wait a short window (`ALERT_WINDOW_*`) and become one incident, so a link failure with ten knock-on alerts gives one conclusion, not ten.
+- **Investigate.** One tool-calling loop with a token budget, call limits, duplicate-call blocking and a no-progress stop. Playbooks (YAML) only *advise* the agent; they never execute anything.
+- **Two-layer read-only guard.** Layer 1 is code: every device command is checked against a whitelist before it is sent. Layer 2 is a read-only account you create on the device. The Zabbix client has a method whitelist the same way.
+
+<p align="center"><img src="docs/images/guard.png" alt="two-layer read-only guard" width="900"></p>
+
+- **Conclude.** The model fills a strict schema. For each of six hypothesis families (local action, local hardware/resource, remote/upstream, link/path quality, management plane, monitoring artifact) it must say supported, ruled out (with counter-evidence) or undetermined — and "can't tell" must say what data and which command would settle it.
+- **Check the evidence.** `netops_ai/analysis/verify.py` can look every quoted line up in the raw Zabbix/device output and grade it verbatim / cross-source / reformatted / fabricated. It runs in the offline replay and regression tools, not in the live pipeline (too many false alarms on real devices, where models often join several lines into one quote).
+
+<p align="center"><img src="docs/images/evidence.png" alt="evidence grading" width="900"></p>
+
+## Features
+
+- Alert pipeline: webhook, merge window, incident de-duplication, Feishu card
+- Read-only device access over SSH/Telnet (Cisco IOS) behind the command whitelist; read-only Zabbix client
+- Structured conclusions with a six-family hypothesis checklist and an honest "can't tell"
+- Playbooks (SOP) as advice, with a linter; three examples: interface down, OSPF adjacency, BGP session
+- Scheduled inspection: trend detectors on Zabbix history plus live read-only status checks, history, diff against the last run, Markdown/HTML export
+- Command audit: every command the AI ran and every one that was refused
+- Local documentation search (the index ships empty; fill it with `tools/kb_ingest.py`)
+- Web dashboard in Chinese and English: overview, incidents, topology, inspection, audit, knowledge base, settings; a demo mode that masks IPs and IDs for screenshots
+- Offline replay and regression tools (`tools/demo_replay.py`, `tools/run_regression.py`)
+
 ## What it looks like
 
 Offline demo (no network, no devices, no model):
@@ -72,6 +97,31 @@ Apache-2.0 — [LICENSE](LICENSE).
 5. 结果推到飞书卡片和网页看板。
 
 **它什么都不会改。** 设备命令先过代码里的白名单（只放行写全的 `show …`），你还要给它一个只读的设备账号。被拒的命令根本不会发出去。
+
+## 工作原理
+
+- **合并。** 时间上靠近的告警在一个短窗口里（`ALERT_WINDOW_*`）攒起来合成一个事件，一条链路故障带出十条连带告警，只给一个结论，不是十个。
+- **取证。** 一个工具循环：有 token 预算、调用次数上限、重复调用拦截、无进展就停。剧本（YAML）只给 agent **建议**，从不执行。
+- **两层只读守卫。** 第一层是代码：每条设备命令发出前先过白名单；第二层是你在设备上建的只读账号。Zabbix 客户端同样有方法白名单。
+
+<p align="center"><img src="docs/images/guard.png" alt="两层只读守卫" width="900"></p>
+
+- **结论。** 模型填一份严格的结构：六类假设（本端操作、本机硬件或资源、对端或上游、链路质量、管理面、监控采集自身问题）逐个表态，支持 / 已排除（要给反证）/ 暂时判不了；判不了的要写清还差什么数据、用哪条命令能判。
+- **核对证据。** `netops_ai/analysis/verify.py` 可以把每条引用的原文拿到 Zabbix/设备原始输出里查，分逐字 / 跨来源 / 重排版 / 编造四级。它在离线回放和回归工具里跑，**不在**在线流水线里（真机上误报多：模型常把几行不相连的原文拼成一条引用）。
+
+<p align="center"><img src="docs/images/evidence.png" alt="证据分级" width="900"></p>
+
+## 功能清单
+
+- 告警流水线：webhook、合并窗口、事件去重、飞书卡片
+- 通过 SSH/Telnet 只读访问设备（Cisco IOS），命令白名单在前；只读的 Zabbix 客户端
+- 结构化结论：六类假设清单，判不出时老实说「判不出」
+- 剧本（SOP）只做建议，带 linter；三个示例：接口 down、OSPF 邻接、BGP 会话
+- 定时巡检：读 Zabbix 历史的趋势检测 + 只读登设备的实时状态检查，有历史、与上次对比、Markdown/HTML 导出
+- 命令审计：AI 跑过的每条命令、被拒的每条命令
+- 本地文档检索（索引随仓库是空的，用 `tools/kb_ingest.py` 灌库）
+- 中英文网页看板：总览、告警与结论、拓扑、巡检、审计、知识库、设置；演示模式自动遮住 IP 和编号，方便截图
+- 离线回放和回归工具（`tools/demo_replay.py`、`tools/run_regression.py`）
 
 ## 效果
 
