@@ -31,9 +31,6 @@
 <p align="center"><img src="docs/images/guard.png" alt="two-layer read-only guard" width="900"></p>
 
 - **Conclude.** The model fills a strict schema. For each of six hypothesis families (local action, local hardware/resource, remote/upstream, link/path quality, management plane, monitoring artifact) it must say supported, ruled out (with counter-evidence) or undetermined — and "can't tell" must say what data and which command would settle it.
-- **Check the evidence.** `netops_ai/analysis/verify.py` can look every quoted line up in the raw Zabbix/device output and grade it verbatim / cross-source / reformatted / fabricated. It runs in the offline replay and regression tools, not in the live pipeline (too many false alarms on real devices, where models often join several lines into one quote).
-
-<p align="center"><img src="docs/images/evidence.png" alt="evidence grading" width="900"></p>
 
 ## Features
 
@@ -107,9 +104,6 @@ Apache-2.0 — [LICENSE](LICENSE).
 <p align="center"><img src="docs/images/guard.png" alt="两层只读守卫" width="900"></p>
 
 - **结论。** 模型填一份严格的结构：六类假设（本端操作、本机硬件或资源、对端或上游、链路质量、管理面、监控采集自身问题）逐个表态，支持 / 已排除（要给反证）/ 暂时判不了；判不了的要写清还差什么数据、用哪条命令能判。
-- **核对证据。** `netops_ai/analysis/verify.py` 可以把每条引用的原文拿到 Zabbix/设备原始输出里查，分逐字 / 跨来源 / 重排版 / 编造四级。它在离线回放和回归工具里跑，**不在**在线流水线里（真机上误报多：模型常把几行不相连的原文拼成一条引用）。
-
-<p align="center"><img src="docs/images/evidence.png" alt="证据分级" width="900"></p>
 
 ## 功能清单
 
