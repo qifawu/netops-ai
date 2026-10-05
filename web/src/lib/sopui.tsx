@@ -3,7 +3,7 @@ import { cn } from "./api";
 
 /** SOP 编辑相关页面共用的小件：请求封装、按钮、提示条、diff 展示。 */
 
-export async function call<T>(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", url: string, body?: unknown): Promise<{ ok: boolean; status: number; data: T & { message?: string } }> {
+export async function call<T>(method: "GET" | "POST" | "PUT" | "DELETE", url: string, body?: unknown): Promise<{ ok: boolean; status: number; data: T & { message?: string } }> {
   try {
     const r = await fetch(url, { method, headers: body ? { "content-type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
     const data = await r.json().catch(() => ({}));
@@ -27,13 +27,11 @@ export function Notice({ tone, children }: { tone: "indigo" | "amber" | "rose" |
 }
 
 export function Btn({ children, onClick, tone = "plain", busy, disabled, small, title }: {
-  children: ReactNode; onClick?: () => void; tone?: "plain" | "brand" | "ok" | "danger"; busy?: boolean; disabled?: boolean; small?: boolean; title?: string;
+  children: ReactNode; onClick?: () => void; tone?: "plain" | "brand"; busy?: boolean; disabled?: boolean; small?: boolean; title?: string;
 }) {
   const t = {
     plain: "bg-white text-slate-700 ring-line hover:bg-slate-50",
     brand: "bg-brand text-white ring-brand hover:bg-indigo-600",
-    ok: "bg-emerald-600 text-white ring-emerald-600 hover:bg-emerald-700",
-    danger: "bg-white text-rose-600 ring-rose-200 hover:bg-rose-50",
   }[tone];
   return (
     <button onClick={onClick} disabled={disabled} title={title}
@@ -44,16 +42,3 @@ export function Btn({ children, onClick, tone = "plain", busy, disabled, small, 
   );
 }
 
-export function DiffView({ diff, maxH = "max-h-72" }: { diff: string; maxH?: string }) {
-  return (
-    <pre className={cn("overflow-auto border-t border-line bg-white py-2 font-mono text-[12px] leading-5", maxH)}>
-      {diff.split("\n").map((l, i) => {
-        const cls = l.startsWith("+++") || l.startsWith("---") ? "text-slate-400"
-          : l.startsWith("+") ? "bg-emerald-50 text-emerald-800"
-            : l.startsWith("-") ? "bg-rose-50 text-rose-800"
-              : l.startsWith("@@") ? "text-indigo-500" : "text-slate-500";
-        return <div key={i} className={cn("whitespace-pre px-4", cls)}>{l || " "}</div>;
-      })}
-    </pre>
-  );
-}
