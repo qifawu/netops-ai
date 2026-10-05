@@ -159,6 +159,14 @@
       "ok": true,
       "denial_reason": "",
       "error": ""
+    },
+    {
+      "source": "ai",
+      "command": "clear ip ospf process",
+      "allowed": false,
+      "ok": false,
+      "denial_reason": "命中禁令动词 'clear'",
+      "error": ""
     }
   ],
   "diagnostic_trace": [
@@ -202,42 +210,18 @@
       "args": {},
       "ok": true,
       "error": ""
+    },
+    {
+      "source": "ai",
+      "tool": "device_show",
+      "args": {
+        "command": "clear ip ospf process"
+      },
+      "ok": false,
+      "error": ""
     }
   ],
-  "evidence_verification": {
-    "summary": {
-      "total": 2,
-      "verified": 2,
-      "unverified": 0,
-      "unverified_indices": [],
-      "grades": {
-        "verbatim": 2,
-        "cross_source": 0,
-        "reformatted": 0,
-        "fabricated": 0
-      },
-      "verbatim": 2,
-      "cross_source": 0,
-      "reformatted": 0,
-      "fabricated": 0
-    },
-    "details": [
-      {
-        "index": 0,
-        "verified": true,
-        "grade": "verbatim",
-        "source_from": "zabbix",
-        "reason": ""
-      },
-      {
-        "index": 1,
-        "verified": true,
-        "grade": "verbatim",
-        "source_from": "device",
-        "reason": ""
-      }
-    ]
-  },
+  "evidence_verification": null,
   "business_rule_violations": [],
   "incident_id": "demo90002-1791100900",
   "incident_fingerprint": "demo90002",

@@ -17,11 +17,11 @@ python -m venv .venv
 pip install -r requirements.txt
 
 python -m pytest tests -q            # no devices, models or credentials needed
-python tools/demo_replay.py          # replays 3 synthetic alerts and renders the Feishu card
+python tools/demo_replay.py          # replays 2 synthetic alerts and renders the Feishu card
 python tools/demo_replay.py --card   # also print the Feishu card JSON
 ```
 
-Expected from the replay: three records and a summary line (`3 条记录，…`); record 2 honestly says "could not determine" and its card is orange.
+Expected from the replay: two records and a summary line (`汇总：2 条记录。`); record 2 honestly says "could not determine" and its card is orange.
 
 To replay your own record, pass the path of an `alert-*.json` produced by the pipeline: `python tools/demo_replay.py records/alert-123.json`.
 
@@ -150,7 +150,7 @@ Trigger a test: `curl -X POST http://127.0.0.1:8000/webhooks/zabbix -H 'content-
 
 **三个层级，互不依赖**：①测试 + 离线回放（不需要任何外部东西）；②网页看板；③完整链路（Zabbix + 设备 + 大模型）。
 
-**①** Python 3.13；`python -m venv .venv`，激活后 `pip install -r requirements.txt`；`python -m pytest tests -q`；`python tools/demo_replay.py`（`--card` 同时打印飞书卡片）。预期：打印 3 条记录和一行汇总；第 2 条老实说「判不出」，卡片是橙色。
+**①** Python 3.13；`python -m venv .venv`，激活后 `pip install -r requirements.txt`；`python -m pytest tests -q`；`python tools/demo_replay.py`（`--card` 同时打印飞书卡片）。预期：打印 2 条记录和一行汇总（`汇总：2 条记录。`）；第 2 条老实说「判不出」，卡片是橙色。
 
 **②** `cd web && npm ci && npm run build`，回到根目录 `python -m uvicorn netops_ai.api.app:app --host 127.0.0.1 --port 8000`，打开 `http://127.0.0.1:8000`。**接口和看板没有鉴权，只绑本机，或放在带认证的反向代理后面。**
 
