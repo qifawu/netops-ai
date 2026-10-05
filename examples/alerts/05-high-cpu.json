@@ -1,0 +1,194 @@
+{
+  "eventid": "90006",
+  "webhook_payload": {
+    "eventid": "90006",
+    "name": "Cisco IOS: High CPU utilization (over 90% for 5m)",
+    "severity": "3",
+    "clock": "1791101700",
+    "hostid": "10004",
+    "host": "D2-vios"
+  },
+  "zabbix_context_text": "## 主机：D2-vios\n\n## 告警原文\n{\"eventid\": \"90006\", \"name\": \"Cisco IOS: High CPU utilization (over 90% for 5m)\", \"severity\": \"3\", \"clock\": \"1791101700\", \"opdata\": \"96 %\"}\n",
+  "device_context_text": "### `show processes cpu sorted`（AI 探路）\n\n```\nCPU utilization for five seconds: 96%/71%; one minute: 94%; five minutes: 92%\n PID Runtime(ms)     Invoked      uSecs   5Sec   1Min   5Min TTY Process\n 118     8341206     1209833       6894 17.43%  16.80%  16.12%   0 IP Input\n  44      211083       98211       2149  0.55%   0.50%   0.48%   0 ARP Input\n```\n",
+  "analysis_parsed": {
+    "headline": "CPU 高，流量被大量送到 CPU，来源待查",
+    "root_cause": "D2 的 CPU 持续在 92% 以上，其中中断级占 71%，最耗 CPU 的进程是 IP Input——大量流量在被送到 CPU 处理。不是设备硬件故障；具体是环路还是单台主机在打流量，现有数据分不出来。",
+    "confidence": "medium",
+    "evidence": [
+      {
+        "claim": "CPU 五秒、一分钟、五分钟都很高，中断级占大头",
+        "source": "CPU utilization for five seconds: 96%/71%; one minute: 94%; five minutes: 92%",
+        "source_from": "device"
+      },
+      {
+        "claim": "最耗 CPU 的进程是 IP Input",
+        "source": " 118     8341206     1209833       6894 17.43%  16.80%  16.12%   0 IP Input",
+        "source_from": "device"
+      }
+    ],
+    "ruled_out": [],
+    "hypothesis_checklist": {
+      "local_action": {
+        "status": "ruled_out",
+        "reason": "没有人为操作的迹象。",
+        "counter_evidence": [
+          {
+            "claim": "负载是进程和中断一起升高，不是某条配置变更的典型表现",
+            "source": "CPU utilization for five seconds: 96%/71%; one minute: 94%; five minutes: 92%",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "local_hardware_or_resource": {
+        "status": "supported",
+        "reason": "CPU 持续 92% 以上，其中中断级占 71%，说明大量流量被送到 CPU 处理。",
+        "counter_evidence": []
+      },
+      "remote_or_upstream": {
+        "status": "ruled_out",
+        "reason": "对端状态正常。",
+        "counter_evidence": [
+          {
+            "claim": "CPU 高是本机在处理流量，不是对端设备故障造成的",
+            "source": "CPU utilization for five seconds: 96%/71%; one minute: 94%; five minutes: 92%",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "link_or_path_quality": {
+        "status": "cannot_determine",
+        "reason": "不知道是哪个端口把流量送进来的，也分不出是环路还是某台主机在打流量。",
+        "counter_evidence": []
+      },
+      "management_plane_or_reachability": {
+        "status": "ruled_out",
+        "reason": "设备管理面可达，命令能正常登录执行。",
+        "counter_evidence": [
+          {
+            "claim": "能登录设备并取到 CPU 数据",
+            "source": " PID Runtime(ms)     Invoked      uSecs   5Sec   1Min   5Min TTY Process",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "monitoring_or_collection_artifact": {
+        "status": "ruled_out",
+        "reason": "设备上取到的状态与监控一致，不是采集假象。",
+        "counter_evidence": [
+          {
+            "claim": "设备自己读到的 CPU 与监控告警一致",
+            "source": "CPU utilization for five seconds: 96%/71%; one minute: 94%; five minutes: 92%",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      }
+    },
+    "alert_roles": [
+      {
+        "eventid": "90006",
+        "role": "root",
+        "reason": "目前能看到的最上游",
+        "caused_by_eventid": ""
+      }
+    ],
+    "grouping": [
+      {
+        "events": [
+          "90006"
+        ],
+        "why_same": "本次只有这一条告警，自成一组"
+      }
+    ],
+    "undistinguishable_candidates": [
+      {
+        "candidates": [
+          "二层环路或广播风暴",
+          "某台主机向本设备发送大量需要 CPU 处理的流量"
+        ],
+        "why_indistinguishable": "两种情况都会让中断级 CPU 升高、IP Input 变忙，只看 CPU 数据分不出是哪一种。",
+        "what_data_would_help": "各接口的入向速率和包类型计数，看是哪个端口在突增",
+        "how_to_get_it": "在 D2 上执行 `show interfaces | include line protocol|input rate`，找入向速率异常的端口",
+        "who": "智能体可继续取证"
+      }
+    ]
+  },
+  "started_at": "2026-10-04T08:15:10+00:00",
+  "finished_at": "2026-10-04T08:15:49+00:00",
+  "alert_clock": 1791101700,
+  "status": "done",
+  "elapsed_seconds": {
+    "device_fetch": 20.3,
+    "analysis": 18.4,
+    "incident_save": 0.02,
+    "feishu_report": 0.5
+  },
+  "diagnostic_mode": "ai",
+  "zabbix_hostid": "10004",
+  "zabbix_fetch_error": "",
+  "device_fetch_error": "",
+  "analysis_error": "",
+  "device_commands_run": [
+    {
+      "source": "ai",
+      "command": "show processes cpu sorted",
+      "allowed": true,
+      "ok": true,
+      "denial_reason": "",
+      "error": ""
+    }
+  ],
+  "diagnostic_trace": [
+    {
+      "source": "ai",
+      "tool": "sop_lookup",
+      "args": {},
+      "ok": true,
+      "error": ""
+    },
+    {
+      "source": "ai",
+      "tool": "device_show",
+      "args": {
+        "command": "show processes cpu sorted"
+      },
+      "ok": true,
+      "error": ""
+    },
+    {
+      "source": "ai",
+      "tool": "zbx_history",
+      "args": {},
+      "ok": true,
+      "error": ""
+    }
+  ],
+  "evidence_verification": null,
+  "business_rule_violations": [],
+  "incident_id": "demo90006-1791101700",
+  "incident_fingerprint": "demo90006",
+  "incident_triggerids": [
+    "26006"
+  ],
+  "incident_objects": [],
+  "incident_role": "root",
+  "incident_grouped_with": [],
+  "incident_repeat_count": 1,
+  "feishu_report": {
+    "attempted": true,
+    "sent": true,
+    "error": "",
+    "transport": "webhook",
+    "eventids": [
+      "90006"
+    ]
+  },
+  "sop_usage": {}
+}

@@ -37,7 +37,7 @@
 - Alert pipeline: webhook, merge window, incident de-duplication, Feishu card
 - Read-only device access over SSH/Telnet (Cisco IOS) behind the command whitelist; read-only Zabbix client
 - Structured conclusions with a six-family hypothesis checklist and an honest "can't tell"
-- Playbooks (SOP) as advice, with a linter; three examples: interface down, OSPF adjacency, BGP session
+- Playbooks (SOP) as advice, with a linter; six examples: interface down, OSPF adjacency, BGP session, device restart, high CPU, interface errors
 - Scheduled inspection: trend detectors on Zabbix history plus live read-only status checks, history, diff against the last run, Markdown/HTML export
 - Command audit: every command the AI ran and every one that was refused
 - Local documentation search (the index ships empty; fill it with `tools/kb_ingest.py`)
@@ -57,6 +57,15 @@ Dashboard:
 | Overview<br><img src="docs/images/ui-overview-en.png" width="460"> | Incident and conclusion<br><img src="docs/images/ui-incident.png" width="460"> |
 | Command audit<br><img src="docs/images/ui-audit-en.png" width="460"> | Topology<br><img src="docs/images/ui-topology-en.png" width="460"> |
 
+### More of the dashboard and the card
+
+| | |
+|---|---|
+| Feishu card — what lands in the chat. Left: root cause found. Right: honest "can't tell" with the next command to run<br><img src="docs/images/feishu-card.png" width="460"> | Automated inspection — trend findings plus read-only status checks of every device<br><img src="docs/images/ui-inspection.png" width="460"> |
+| Knowledge base — search your own documents; shown with the three sample notes in `examples/kb/`<br><img src="docs/images/ui-knowledge.png" width="460"> | Settings — edit `.env` from the page; secrets are masked<br><img src="docs/images/ui-settings.png" width="460"> |
+
+The cards are rendered from the JSON of two synthetic examples (an illustration, not a screenshot of the Feishu client). `python tools/seed_demo.py` fills the dashboard with six synthetic incidents so you can click through everything without any setup.
+
 ## Deploy
 
 Three levels; each works without the next. Full steps: [docs/INSTALL.md](docs/INSTALL.md).
@@ -68,7 +77,7 @@ pip install -r requirements.txt                   # Python 3.13
 ```
 
 1. **Try it offline** — `python tools/demo_replay.py` (also `python -m pytest tests -q`).
-2. **Dashboard** — `cd web && npm ci && npm run build && cd ..`, then `python -m uvicorn netops_ai.api.app:app --host 127.0.0.1 --port 8000` and open http://127.0.0.1:8000.
+2. **Dashboard** — `cd web && npm ci && npm run build && cd ..`, then (optional) `python tools/seed_demo.py` to fill it with six synthetic incidents, then `python -m uvicorn netops_ai.api.app:app --host 127.0.0.1 --port 8000` and open http://127.0.0.1:8000.
 3. **Full pipeline** — `cp env.example .env` and fill in: Zabbix (read-only user), devices (**read-only account**), an LLM endpoint, optionally Feishu; list your devices in `topology.yaml`; in Zabbix add a webhook media type that posts to `/webhooks/zabbix`.
 
 The API and dashboard have **no login**: keep uvicorn on `127.0.0.1` and put an authenticating reverse proxy in front (nginx example in [INSTALL.md](docs/INSTALL.md#securing-the-api-and-dashboard)).
@@ -76,6 +85,16 @@ The API and dashboard have **no login**: keep uvicorn on `127.0.0.1` and put an 
 ## The environment it was built and tested on
 
 A virtual network in EVE-NG: 7 Cisco nodes in three layers (2 core and 2 aggregation IOSv, 3 access IOSv-L2), running OSPF and a BGP session, one Zabbix 7.0 server polling over SNMP and receiving traps. Faults were injected by hand on the devices (interface shutdown, OSPF neighbor loss, BGP session shutdown, reload) and the agent was checked against them. Cisco IOS only; not run in production. No device images or configs are included. Details and how to rebuild it: [docs/LAB.md](docs/LAB.md).
+
+## Where it could go next
+
+Directions where help is welcome; none of them is promised on a date.
+
+- **More vendors.** Each one is a command-whitelist ruleset, a command catalog and a few playbooks. Cisco IOS is the template.
+- **More playbooks.** Six ship today. A playbook is a small YAML file; [docs/PLAYBOOK-FORMAT.md](docs/PLAYBOOK-FORMAT.md) has a ten-minute guide.
+- **More notification channels** next to Feishu (chat webhooks, e-mail).
+- **Built-in authentication** for the dashboard and webhook, so a reverse proxy is optional.
+- **Richer inspection rules** and more status checks (STP, port-channel, power and fan).
 
 ## License
 
@@ -110,7 +129,7 @@ Apache-2.0 — [LICENSE](LICENSE).
 - 告警流水线：webhook、合并窗口、事件去重、飞书卡片
 - 通过 SSH/Telnet 只读访问设备（Cisco IOS），命令白名单在前；只读的 Zabbix 客户端
 - 结构化结论：六类假设清单，判不出时老实说「判不出」
-- 剧本（SOP）只做建议，带 linter；三个示例：接口 down、OSPF 邻接、BGP 会话
+- 剧本（SOP）只做建议，带 linter；六个示例：接口 down、OSPF 邻接、BGP 会话、设备重启、CPU 高、接口错误
 - 定时巡检：读 Zabbix 历史的趋势检测 + 只读登设备的实时状态检查，有历史、与上次对比、Markdown/HTML 导出
 - 命令审计：AI 跑过的每条命令、被拒的每条命令
 - 本地文档检索（索引随仓库是空的，用 `tools/kb_ingest.py` 灌库）
@@ -130,6 +149,15 @@ Apache-2.0 — [LICENSE](LICENSE).
 | 系统总览<br><img src="docs/images/ui-overview.png" width="460"> | 告警与结论<br><img src="docs/images/ui-incident.png" width="460"> |
 | 命令审计<br><img src="docs/images/ui-audit.png" width="460"> | 设备与拓扑<br><img src="docs/images/ui-topology.png" width="460"> |
 
+### 看板和卡片的更多页面
+
+| | |
+|---|---|
+| 飞书卡片——推到群里的样子。左：找到了根因；右：老实说「判不出」并给出下一条该敲的命令<br><img src="docs/images/feishu-card.png" width="460"> | 自动化巡检——趋势发现加对每台设备的只读状态检查<br><img src="docs/images/ui-inspection.png" width="460"> |
+| 知识库——检索你自己的文档；图里是 `examples/kb/` 的三篇示例笔记<br><img src="docs/images/ui-knowledge.png" width="460"> | 系统设置——在页面里改 `.env`，密钥掩码显示<br><img src="docs/images/ui-settings.png" width="460"> |
+
+卡片图是用两条合成示例的卡片 JSON 渲染的示意图（不是飞书客户端截图）。`python tools/seed_demo.py` 会灌入六条合成告警，不用任何配置就能把所有页面点一遍。
+
 ## 怎么部署
 
 三个层级，互不依赖。完整步骤见 [docs/INSTALL.md](docs/INSTALL.md)。
@@ -141,7 +169,7 @@ pip install -r requirements.txt                   # Python 3.13
 ```
 
 1. **离线体验** —— `python tools/demo_replay.py`（也可以 `python -m pytest tests -q`）。
-2. **看板** —— `cd web && npm ci && npm run build && cd ..`，再 `python -m uvicorn netops_ai.api.app:app --host 127.0.0.1 --port 8000`，打开 http://127.0.0.1:8000 。
+2. **看板** —— `cd web && npm ci && npm run build && cd ..`，（可选）`python tools/seed_demo.py` 灌入六条合成告警，再 `python -m uvicorn netops_ai.api.app:app --host 127.0.0.1 --port 8000`，打开 http://127.0.0.1:8000 。
 3. **完整链路** —— `cp env.example .env` 后填写：Zabbix（只读用户）、设备（**只读账号**）、大模型接口，飞书可选；在 `topology.yaml` 里写你的设备；Zabbix 里加一个 webhook 媒介类型，POST 到 `/webhooks/zabbix`。
 
 接口和看板**没有登录**：uvicorn 只监听 `127.0.0.1`，前面放一个带认证的反向代理（nginx 示例见 [INSTALL.md](docs/INSTALL.md#securing-the-api-and-dashboard)）。
@@ -149,6 +177,16 @@ pip install -r requirements.txt                   # Python 3.13
 ## 开发和测试用的环境
 
 EVE-NG 里的一套虚拟网络：三层 7 台 Cisco 节点（2 台核心 + 2 台汇聚 IOSv，3 台接入 IOSv-L2），跑 OSPF 和一条 BGP 会话；一台 Zabbix 7.0 用 SNMP 轮询并接收 trap。故障是在设备上手工制造的（接口 shutdown、OSPF 邻居丢失、BGP 会话 shutdown、reload），再检查 agent 的结论。仅支持 Cisco IOS，没有在生产网络跑过。仓库不含设备镜像和配置。详情和自己怎么搭一个：[docs/LAB.md](docs/LAB.md)。
+
+## 接下来可能的方向
+
+欢迎一起做的方向，都不承诺时间。
+
+- **更多厂商。** 每个厂商是一套命令白名单规则、一份命令目录和几个剧本，Cisco IOS 就是模板。
+- **更多剧本。** 现在带 6 个。剧本是一个小 YAML，[docs/PLAYBOOK-FORMAT.md](docs/PLAYBOOK-FORMAT.md) 里有十分钟上手指南。
+- **飞书之外的通知渠道**（群聊 webhook、邮件）。
+- **内置登录**，让反向代理变成可选。
+- **更丰富的巡检规则**和状态检查（STP、端口聚合、电源风扇）。
 
 ## 许可证
 

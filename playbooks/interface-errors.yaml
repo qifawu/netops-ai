@@ -1,0 +1,63 @@
+# Interface errors SOP.
+#
+# Sources:
+# - Cisco, "Troubleshoot Switch Port and Interface Problems": input errors / CRC / runts / giants point at the
+#   physical layer (cable, optics, duplex mismatch); output drops point at congestion; collisions or late collisions
+#   on a full-duplex port point at a duplex mismatch.
+
+name: interface-errors
+description: >
+  思科接口错误计数增长 SOP。区分物理层问题（CRC/frame/runts，线缆、光模块、双工不匹配）
+  和拥塞（output drops）。
+applicability: "适用于 Cisco 接口 high error rate / errors / discards 告警，且告警能定位到接口；接口已 down 的情况走 interface-link-down。"
+limits:
+  max_main_steps: 4
+  max_tokens: 4000
+match:
+  vendor: cisco
+  trigger_name_contains:
+    - High error rate
+    - errors
+    - discards
+start: read_counters
+
+steps:
+  - id: read_counters
+    why: "show interfaces 同屏给出速率/双工、input errors、CRC、frame、runts、giants、output drops 和 collisions。CRC/frame 高是物理层（线缆、光模块、两端速率双工不一致）；output drops 高是拥塞；collisions/late collision 出现在全双工口上基本就是双工不匹配。注意这些是累计计数，要和上次比较增长速度，单个大数字不说明现在还在出错。"
+    expect: "看到各类错误计数和速率/双工，并判断更像物理层还是拥塞。"
+    main: true
+    action:
+      tool: device
+      command: "show interfaces {alert_interface}"
+    branches:
+      - when: "output_contains('late collision')"
+        goto: duplex_check
+      - when: "output_contains('collisions')"
+        goto: duplex_check
+      - when: default
+        goto: counter_history
+    provenance: {source: human, date: "2026-10-05"}
+
+  - id: duplex_check
+    why: "出现 collisions / late collision 时确认两端的速率和双工是否一致：看本端 show interfaces status 里的 Speed/Duplex，再用拓扑找到对端口。一端自动协商、另一端写死是最常见的不匹配原因。"
+    expect: "看到本端的速率/双工设置，并列出需要核对的对端口。"
+    main: true
+    action:
+      tool: topology_neighbors
+      interface: "{alert_interface}"
+    branches:
+      - when: default
+        goto: __ai__
+    provenance: {source: human, date: "2026-10-05"}
+
+  - id: counter_history
+    why: "累计计数需要时间维度：用 Zabbix 里该接口的错误计数监控项看增长趋势。没有增长（计数是历史遗留）就不用继续追；持续增长才是现在还在发生的问题。"
+    expect: "看到该接口错误类监控项，据此取历史判断是否仍在增长。"
+    main: true
+    action:
+      tool: zbx_items
+      key: errors
+    branches:
+      - when: default
+        goto: __ai__
+    provenance: {source: human, date: "2026-10-05"}

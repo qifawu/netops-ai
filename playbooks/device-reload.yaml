@@ -1,0 +1,83 @@
+# Device restart SOP.
+#
+# Sources:
+# - Cisco, "Troubleshoot Unexpected Reloads on Cisco IOS": `show version` reports the last reload reason
+#   ("System returned to ROM by ...") and the uptime; `%SYS-5-RESTART` / `%SYS-5-RELOAD` in syslog mark the event.
+# - Typical causes: operator `reload`, power loss, software crash (traceback / "Last reload reason: ... crash"),
+#   watchdog or memory exhaustion.
+
+name: device-reload
+description: >
+  思科设备重启 SOP。告警是「设备刚重启（uptime 很短）」时，区分人为 reload、掉电、软件崩溃，
+  以及重启之后各邻居是否已经恢复。
+applicability: "适用于 Cisco 设备 has been restarted / coldStart / uptime 很短 的告警；不适用于设备持续不可达。"
+limits:
+  max_main_steps: 4
+  max_tokens: 4000
+match:
+  vendor: cisco
+  trigger_name_contains:
+    - has been restarted
+    - coldStart
+    - restarted (uptime
+start: read_uptime_and_reason
+
+steps:
+  - id: read_uptime_and_reason
+    why: "一条 show version 同时给出 uptime 和上次重启原因。「System returned to ROM by reload」是有人执行了 reload；「power-on」是掉电；出现 crash/traceback 字样是软件故障；原因为空或不明时，下一步看故障窗口的 syslog。"
+    expect: "看到设备 uptime 和 Last reload reason / System returned to ROM by 这一行。"
+    main: true
+    action:
+      tool: device
+      command: "show version"
+    branches:
+      - when: "output_contains('returned to ROM by reload')"
+        goto: find_who_reloaded
+      - when: "output_contains('power-on')"
+        goto: __ai__
+      - when: "output_contains('crash')"
+        goto: crash_evidence
+      - when: default
+        goto: window_syslog
+    provenance: {source: human, date: "2026-10-05"}
+
+  - id: find_who_reloaded
+    why: "reload 是配置命令，谁执行的会留下 %SYS-5-RELOAD 或 %SYS-5-CONFIG_I（Configured from console/vty by 用户名）。取 Zabbix 收到的故障窗口 syslog，找这两条。找不到不等于没人操作：设备重启会清掉本地日志 buffer，只能靠 Zabbix 侧留存的日志或 AAA 审计。"
+    expect: "看到 %SYS-5-RELOAD 或 %SYS-5-CONFIG_I，说明是谁、从哪里发起的；没有就如实写查不到操作人。"
+    main: true
+    action:
+      tool: zbx_syslog
+      since: "{alert_window_from}"
+      until: "{alert_window_to}"
+    branches:
+      - when: "output_contains('%SYS-5-RELOAD')"
+        goto: __end__
+      - when: "output_contains('%SYS-5-CONFIG_I')"
+        goto: __end__
+      - when: default
+        goto: __ai__
+    provenance: {source: human, date: "2026-10-05"}
+
+  - id: crash_evidence
+    why: "show version 提到 crash 时，进一步看日志里有没有 traceback、内存不足或 watchdog 记录；有就是软件故障，结论应指向升级或收集 crash 文件。"
+    expect: "看到 traceback / MALLOCFAIL / watchdog 之类的日志行。"
+    main: true
+    action:
+      tool: device
+      command: "show logging | include TRACEBACK|MALLOCFAIL|WATCHDOG"
+    branches:
+      - when: default
+        goto: __ai__
+    provenance: {source: human, date: "2026-10-05"}
+
+  - id: window_syslog
+    why: "上次重启原因不明时，看故障窗口前后的 syslog：有没有接口 down、电源/风扇告警或 %SYS-5-RESTART，用它们判断是外部原因（掉电）还是设备自己的问题。"
+    expect: "看到重启前后的日志，判断是外部掉电还是设备自身异常。"
+    main: true
+    action:
+      tool: device
+      command: "show logging | include %SYS-|%PWR|%ENVM"
+    branches:
+      - when: default
+        goto: __ai__
+    provenance: {source: human, date: "2026-10-05"}

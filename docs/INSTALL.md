@@ -17,11 +17,11 @@ python -m venv .venv
 pip install -r requirements.txt
 
 python -m pytest tests -q            # no devices, models or credentials needed
-python tools/demo_replay.py          # replays 2 synthetic alerts and renders the Feishu card
+python tools/demo_replay.py          # replays 6 synthetic alerts and renders the Feishu card
 python tools/demo_replay.py --card   # also print the Feishu card JSON
 ```
 
-Expected from the replay: two records and a summary line (`汇总：2 条记录。`); record 2 honestly says "could not determine" and its card is orange.
+Expected from the replay: six records and a summary line (`汇总：6 条记录。`). Some of them honestly say "could not determine" and name what is missing; those cards are not green.
 
 To replay your own record, pass the path of an `alert-*.json` produced by the pipeline: `python tools/demo_replay.py records/alert-123.json`.
 
@@ -32,6 +32,7 @@ cd web
 npm ci
 npm run build                        # produces web/dist, served by the API process
 cd ..
+python tools/seed_demo.py            # optional: fill the dashboard with 6 synthetic incidents
 python -m uvicorn netops_ai.api.app:app --host 127.0.0.1 --port 8000
 # open http://127.0.0.1:8000
 ```
@@ -131,7 +132,7 @@ Trigger a test: `curl -X POST http://127.0.0.1:8000/webhooks/zabbix -H 'content-
 - **Zabbix in docker**: `deploy/zabbix/` — see its README.
 - **SNMP traps** (faster than polling for link/OSPF/BGP events): `deploy/trap/` contains lab scripts to install `snmptrapd` and add trap items. They write device/guest configuration in a lab; read them before running anything.
 - **A lab to try it on**: [LAB.md](LAB.md) describes the reference lab (7 Cisco nodes, Zabbix, traps, the faults we injected) and how to rebuild something similar.
-- **Documentation search**: the index ships empty. `python tools/kb_ingest.py --help`, ingest documents you are licensed to use; the agent's `doc_search` tool then returns passages labelled as vendor documentation (never as device evidence).
+- **Documentation search**: the index ships empty. Try it with the three sample notes: `python tools/kb_ingest.py examples/kb`, then open the Knowledge page. For your own use, ingest documents you are licensed to use (`python tools/kb_ingest.py --help`); the agent's `doc_search` tool then returns passages labelled as vendor documentation (never as device evidence).
 - **Regression runs**: `python -m tools.run_regression spike-demo` replays a case directory (`experiments/spike/<case>/input-zabbix.md` + `input-device.md`) through the model several times. A synthetic `spike-demo` case is included; this one calls your LLM.
 - **Scheduled inspection**: runs every `SCHEDULE_INTERVAL_MINUTES` (default 60) while the API process is up.
 
@@ -150,9 +151,9 @@ Trigger a test: `curl -X POST http://127.0.0.1:8000/webhooks/zabbix -H 'content-
 
 **三个层级，互不依赖**：①测试 + 离线回放（不需要任何外部东西）；②网页看板；③完整链路（Zabbix + 设备 + 大模型）。
 
-**①** Python 3.13；`python -m venv .venv`，激活后 `pip install -r requirements.txt`；`python -m pytest tests -q`；`python tools/demo_replay.py`（`--card` 同时打印飞书卡片）。预期：打印 2 条记录和一行汇总（`汇总：2 条记录。`）；第 2 条老实说「判不出」，卡片是橙色。
+**①** Python 3.13；`python -m venv .venv`，激活后 `pip install -r requirements.txt`；`python -m pytest tests -q`；`python tools/demo_replay.py`（`--card` 同时打印飞书卡片）。预期：打印 6 条记录和一行汇总（`汇总：6 条记录。`）；其中几条老实说「判不出」并写明还差什么，卡片不是绿色。
 
-**②** `cd web && npm ci && npm run build`，回到根目录 `python -m uvicorn netops_ai.api.app:app --host 127.0.0.1 --port 8000`，打开 `http://127.0.0.1:8000`。**接口和看板没有鉴权，只绑本机，或放在带认证的反向代理后面。**
+**②** `cd web && npm ci && npm run build`，（可选）回到根目录跑 `python tools/seed_demo.py` 灌入 6 条合成告警让看板有数据，回到根目录 `python -m uvicorn netops_ai.api.app:app --host 127.0.0.1 --port 8000`，打开 `http://127.0.0.1:8000`。**接口和看板没有鉴权，只绑本机，或放在带认证的反向代理后面。**
 
 **保护接口和看板**：谁能访问端口，谁就能看告警结论，而且「系统设置」页能改写 `.env`（密钥在页面上是掩码，但 webhook 地址、模型地址是可改的）。所以：①uvicorn 始终用 `--host 127.0.0.1`，只通过带认证的反向代理对外；②Zabbix 没法在浏览器里输密码，所以 `/webhooks/zabbix` 单独放出来，用来源地址限制代替密码。nginx 示例见上文英文部分（`location /` 加 `auth_basic`，`location = /webhooks/zabbix` 里 `allow` 你的 Zabbix 服务器地址再 `deny all`）。这样 Zabbix 媒介类型的 `url` 填代理的地址，API 进程本身一直只监听本机。换成别的代理也守同样两条：除 webhook 外一律要认证，webhook 按来源地址限制。
 

@@ -1,0 +1,204 @@
+{
+  "eventid": "90007",
+  "webhook_payload": {
+    "eventid": "90007",
+    "name": "Cisco IOS: Interface Gi0/1(): High error rate",
+    "severity": "3",
+    "clock": "1791102000",
+    "hostid": "10006",
+    "host": "A2-viosl2"
+  },
+  "zabbix_context_text": "## 主机：A2-viosl2\n\n## 告警原文\n{\"eventid\": \"90007\", \"name\": \"Cisco IOS: Interface Gi0/1(): High error rate\", \"severity\": \"2\", \"clock\": \"1791102000\", \"opdata\": \"5120\"}\n",
+  "device_context_text": "### `show interfaces GigabitEthernet0/1`（AI 探路）\n\n```\nGigabitEthernet0/1 is up, line protocol is up\n  Half-duplex, 100Mb/s, media type is RJ45\n  5120 input errors, 5120 CRC, 0 frame, 0 overrun, 0 ignored\n  0 output errors, 912 collisions, 0 interface resets, 38 late collision\n```\n",
+  "analysis_parsed": {
+    "headline": "接口错误率高，疑似双工不匹配",
+    "root_cause": "A2 的 Gi0/1 工作在半双工 100Mb/s，累计 5120 个 CRC 错误和 38 个 late collision，是典型的双工不匹配；对端口的速率双工还没确认。",
+    "confidence": "medium",
+    "evidence": [
+      {
+        "claim": "本端口是半双工 100Mb/s",
+        "source": "  Half-duplex, 100Mb/s, media type is RJ45",
+        "source_from": "device"
+      },
+      {
+        "claim": "CRC 错误累计 5120 个",
+        "source": "  5120 input errors, 5120 CRC, 0 frame, 0 overrun, 0 ignored",
+        "source_from": "device"
+      },
+      {
+        "claim": "出现 late collision",
+        "source": "  0 output errors, 912 collisions, 0 interface resets, 38 late collision",
+        "source_from": "device"
+      }
+    ],
+    "ruled_out": [
+      {
+        "possibility": "接口被关闭或硬件掉线",
+        "reason": "接口 up/up。"
+      }
+    ],
+    "hypothesis_checklist": {
+      "local_action": {
+        "status": "ruled_out",
+        "reason": "没有人为操作的迹象。",
+        "counter_evidence": [
+          {
+            "claim": "接口当前状态是 up/up，没有被关闭",
+            "source": "GigabitEthernet0/1 is up, line protocol is up",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "local_hardware_or_resource": {
+        "status": "ruled_out",
+        "reason": "CPU 和内存正常。",
+        "counter_evidence": [
+          {
+            "claim": "接口 up/up，没有硬件掉线",
+            "source": "GigabitEthernet0/1 is up, line protocol is up",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "remote_or_upstream": {
+        "status": "cannot_determine",
+        "reason": "没有对端口的速率双工数据，不能确认对端是否设成全双工。",
+        "counter_evidence": []
+      },
+      "link_or_path_quality": {
+        "status": "supported",
+        "reason": "本端口是半双工 100Mb/s，同时有 CRC 和 late collision，典型的双工不匹配表现。",
+        "counter_evidence": []
+      },
+      "management_plane_or_reachability": {
+        "status": "ruled_out",
+        "reason": "设备管理面可达，命令能正常登录执行。",
+        "counter_evidence": [
+          {
+            "claim": "能登录设备并取到接口数据",
+            "source": "GigabitEthernet0/1 is up, line protocol is up",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "monitoring_or_collection_artifact": {
+        "status": "ruled_out",
+        "reason": "设备上取到的状态与监控一致，不是采集假象。",
+        "counter_evidence": [
+          {
+            "claim": "设备自己读到的错误计数与监控告警一致",
+            "source": "  5120 input errors, 5120 CRC, 0 frame, 0 overrun, 0 ignored",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      }
+    },
+    "alert_roles": [
+      {
+        "eventid": "90007",
+        "role": "root",
+        "reason": "目前能看到的最上游",
+        "caused_by_eventid": ""
+      }
+    ],
+    "grouping": [
+      {
+        "events": [
+          "90007"
+        ],
+        "why_same": "本次只有这一条告警，自成一组"
+      }
+    ],
+    "undistinguishable_candidates": [
+      {
+        "candidates": [
+          "本端把速率双工写死而对端自动协商",
+          "对端口配置成了全双工但本端协商成半双工"
+        ],
+        "why_indistinguishable": "两种配置错误在本端都表现为半双工加 late collision，要看对端口才知道哪一侧改错了。",
+        "what_data_would_help": "对端口的速率、双工和协商设置",
+        "how_to_get_it": "用拓扑找到 Gi0/1 的对端 D1 的 Gi0/5，执行 `show interfaces GigabitEthernet0/5` 看 Duplex 和 Speed",
+        "who": "智能体可继续取证"
+      }
+    ]
+  },
+  "started_at": "2026-10-04T08:20:15+00:00",
+  "finished_at": "2026-10-04T08:20:50+00:00",
+  "alert_clock": 1791102000,
+  "status": "done",
+  "elapsed_seconds": {
+    "device_fetch": 17.9,
+    "analysis": 16.2,
+    "incident_save": 0.02,
+    "feishu_report": 0.4
+  },
+  "diagnostic_mode": "ai",
+  "zabbix_hostid": "10006",
+  "zabbix_fetch_error": "",
+  "device_fetch_error": "",
+  "analysis_error": "",
+  "device_commands_run": [
+    {
+      "source": "ai",
+      "command": "show interfaces GigabitEthernet0/1",
+      "allowed": true,
+      "ok": true,
+      "denial_reason": "",
+      "error": ""
+    }
+  ],
+  "diagnostic_trace": [
+    {
+      "source": "ai",
+      "tool": "sop_lookup",
+      "args": {},
+      "ok": true,
+      "error": ""
+    },
+    {
+      "source": "ai",
+      "tool": "device_show",
+      "args": {
+        "command": "show interfaces GigabitEthernet0/1"
+      },
+      "ok": true,
+      "error": ""
+    },
+    {
+      "source": "ai",
+      "tool": "topology_neighbors",
+      "args": {},
+      "ok": true,
+      "error": ""
+    }
+  ],
+  "evidence_verification": null,
+  "business_rule_violations": [],
+  "incident_id": "demo90007-1791102000",
+  "incident_fingerprint": "demo90007",
+  "incident_triggerids": [
+    "26007"
+  ],
+  "incident_objects": [],
+  "incident_role": "root",
+  "incident_grouped_with": [],
+  "incident_repeat_count": 1,
+  "feishu_report": {
+    "attempted": true,
+    "sent": true,
+    "error": "",
+    "transport": "webhook",
+    "eventids": [
+      "90007"
+    ]
+  },
+  "sop_usage": {}
+}

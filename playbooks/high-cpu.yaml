@@ -1,0 +1,69 @@
+# High CPU SOP.
+#
+# Sources:
+# - Cisco, "Troubleshoot High CPU Utilization on Cisco IOS Routers": `show processes cpu sorted` splits the load
+#   into process level and interrupt level (the "x%/y%" pair); high interrupt level points at traffic that is
+#   switched/punted by the CPU, high process level points at a specific process.
+# - Common culprits: routing protocol churn (OSPF/BGP flaps), ARP/ICMP floods, SNMP polling storms, logging.
+
+name: high-cpu
+description: >
+  思科设备 CPU 利用率高 SOP。先判断是「进程」占的还是「中断」占的，再对应到
+  路由协议抖动、SNMP/日志风暴或流量被送到 CPU。
+applicability: "适用于 Cisco 设备 High CPU utilization 告警；不适用于 CPU 已恢复正常且没有持续的情况（先看 Zabbix 历史确认）。"
+limits:
+  max_main_steps: 4
+  max_tokens: 4000
+match:
+  vendor: cisco
+  trigger_name_contains:
+    - High CPU
+    - CPU utilization
+    - CPU load
+start: cpu_breakdown
+
+steps:
+  - id: cpu_breakdown
+    why: "show processes cpu sorted 的第一行 'five seconds: A%/B%' 里 A 是总 CPU，B 是中断级占用：B 接近 A 说明流量被送到 CPU 处理（中断），A 远大于 B 说明是某个进程。下面按 5 秒占用排序列出最耗 CPU 的进程。"
+    expect: "看到总 CPU、中断占用和最耗 CPU 的进程名。"
+    main: true
+    action:
+      tool: device
+      command: "show processes cpu sorted"
+    branches:
+      - when: "output_contains('OSPF')"
+        goto: routing_churn
+      - when: "output_contains('BGP')"
+        goto: routing_churn
+      - when: "output_contains('SNMP')"
+        goto: snmp_or_logging
+      - when: "output_contains('Syslog')"
+        goto: snmp_or_logging
+      - when: default
+        goto: __ai__
+    provenance: {source: human, date: "2026-10-05"}
+
+  - id: routing_churn
+    why: "路由进程占 CPU 常见原因是邻居抖动、LSA/路由更新风暴。看故障窗口的 syslog 里有没有反复的 %OSPF-5-ADJCHG / %BGP-5-ADJCHANGE；有，就把 CPU 高归因于路由抖动，转去查抖动本身（接口、对端）。"
+    expect: "看到窗口内反复的邻居状态变化日志，或确认没有。"
+    main: true
+    action:
+      tool: zbx_syslog
+      since: "{alert_window_from}"
+      until: "{alert_window_to}"
+    branches:
+      - when: default
+        goto: __ai__
+    provenance: {source: human, date: "2026-10-05"}
+
+  - id: snmp_or_logging
+    why: "SNMP 或日志进程占 CPU，多半是轮询过于频繁或日志风暴（某个接口反复 up/down、debug 开着）。看设备本地日志里最近的重复条目，找出是谁在刷屏。"
+    expect: "看到重复刷屏的日志类型，或确认日志量正常。"
+    main: true
+    action:
+      tool: device
+      command: "show logging | include %"
+    branches:
+      - when: default
+        goto: __ai__
+    provenance: {source: human, date: "2026-10-05"}

@@ -1,0 +1,196 @@
+{
+  "eventid": "90005",
+  "webhook_payload": {
+    "eventid": "90005",
+    "name": "Cisco IOS: V2 (vIOS 核心路由) has been restarted (uptime < 10m)",
+    "severity": "3",
+    "clock": "1791101400",
+    "hostid": "10002",
+    "host": "V2-vios"
+  },
+  "zabbix_context_text": "## 主机：V2-vios\n\n## 告警原文\n{\"eventid\": \"90005\", \"name\": \"Cisco IOS: V2 (vIOS 核心路由) has been restarted (uptime < 10m)\", \"severity\": \"2\", \"clock\": \"1791101400\", \"opdata\": \"\"}\n\n## 最近日志\nOct  4 08:10:03 V2 %SYS-5-RELOAD: Reload requested by admin on vty0 (192.0.2.10). Reload Reason: Reload Command.\nOct  4 08:11:47 V2 %SYS-5-RESTART: System restarted --\n",
+  "device_context_text": "### `show version`（AI 探路）\n\n```\nROM: Bootstrap program is IOSv\nV2 uptime is 1 minute\nSystem returned to ROM by reload at 08:10:44 UTC Sun Oct 4 2026\n```\n",
+  "analysis_parsed": {
+    "headline": "V2 被管理员执行 reload 重启",
+    "root_cause": "V2 被管理员 admin 在 vty0 上执行了 reload，重启后 uptime 只有 1 分钟；不是掉电或软件崩溃。",
+    "confidence": "high",
+    "evidence": [
+      {
+        "claim": "日志记录管理员发起了 reload",
+        "source": "%SYS-5-RELOAD: Reload requested by admin on vty0 (192.0.2.10). Reload Reason: Reload Command.",
+        "source_from": "zabbix"
+      },
+      {
+        "claim": "设备记录的上次重启原因是 reload",
+        "source": "System returned to ROM by reload at 08:10:44 UTC Sun Oct 4 2026",
+        "source_from": "device"
+      }
+    ],
+    "ruled_out": [
+      {
+        "possibility": "掉电或软件崩溃",
+        "reason": "重启原因是 reload 命令，没有崩溃痕迹。"
+      }
+    ],
+    "hypothesis_checklist": {
+      "local_action": {
+        "status": "supported",
+        "reason": "日志有管理员发起 reload 的记录，show version 的重启原因也是 reload。",
+        "counter_evidence": []
+      },
+      "local_hardware_or_resource": {
+        "status": "ruled_out",
+        "reason": "CPU 和内存正常。",
+        "counter_evidence": [
+          {
+            "claim": "重启原因是 reload 命令，不是掉电或崩溃",
+            "source": "System returned to ROM by reload at 08:10:44 UTC Sun Oct 4 2026",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "remote_or_upstream": {
+        "status": "ruled_out",
+        "reason": "对端状态正常。",
+        "counter_evidence": [
+          {
+            "claim": "本端日志已直接记录是谁发起的 reload",
+            "source": "%SYS-5-RELOAD: Reload requested by admin on vty0 (192.0.2.10). Reload Reason: Reload Command.",
+            "source_from": "zabbix",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "link_or_path_quality": {
+        "status": "ruled_out",
+        "reason": "接口错误计数没有异常。",
+        "counter_evidence": [
+          {
+            "claim": "重启原因是 reload 命令，与链路质量无关",
+            "source": "System returned to ROM by reload at 08:10:44 UTC Sun Oct 4 2026",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "management_plane_or_reachability": {
+        "status": "ruled_out",
+        "reason": "设备管理面可达，命令能正常登录执行。",
+        "counter_evidence": [
+          {
+            "claim": "能登录设备并取到版本信息",
+            "source": "V2 uptime is 1 minute",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      },
+      "monitoring_or_collection_artifact": {
+        "status": "ruled_out",
+        "reason": "设备上取到的状态与监控一致，不是采集假象。",
+        "counter_evidence": [
+          {
+            "claim": "设备自己报告 uptime 只有 1 分钟，与告警一致",
+            "source": "V2 uptime is 1 minute",
+            "source_from": "device",
+            "contradiction": "direct",
+            "time_relevance": "fault_window"
+          }
+        ]
+      }
+    },
+    "alert_roles": [
+      {
+        "eventid": "90005",
+        "role": "root",
+        "reason": "reload 是源头",
+        "caused_by_eventid": ""
+      }
+    ],
+    "grouping": [
+      {
+        "events": [
+          "90005"
+        ],
+        "why_same": "本次只有这一条告警，自成一组"
+      }
+    ],
+    "undistinguishable_candidates": []
+  },
+  "started_at": "2026-10-04T08:12:05+00:00",
+  "finished_at": "2026-10-04T08:12:36+00:00",
+  "alert_clock": 1791101400,
+  "status": "done",
+  "elapsed_seconds": {
+    "device_fetch": 15.2,
+    "analysis": 14.0,
+    "incident_save": 0.02,
+    "feishu_report": 0.6
+  },
+  "diagnostic_mode": "ai",
+  "zabbix_hostid": "10002",
+  "zabbix_fetch_error": "",
+  "device_fetch_error": "",
+  "analysis_error": "",
+  "device_commands_run": [
+    {
+      "source": "ai",
+      "command": "show version",
+      "allowed": true,
+      "ok": true,
+      "denial_reason": "",
+      "error": ""
+    }
+  ],
+  "diagnostic_trace": [
+    {
+      "source": "ai",
+      "tool": "sop_lookup",
+      "args": {},
+      "ok": true,
+      "error": ""
+    },
+    {
+      "source": "ai",
+      "tool": "device_show",
+      "args": {
+        "command": "show version"
+      },
+      "ok": true,
+      "error": ""
+    },
+    {
+      "source": "ai",
+      "tool": "zbx_syslog",
+      "args": {},
+      "ok": true,
+      "error": ""
+    }
+  ],
+  "evidence_verification": null,
+  "business_rule_violations": [],
+  "incident_id": "demo90005-1791101400",
+  "incident_fingerprint": "demo90005",
+  "incident_triggerids": [
+    "26005"
+  ],
+  "incident_objects": [],
+  "incident_role": "root",
+  "incident_grouped_with": [],
+  "incident_repeat_count": 1,
+  "feishu_report": {
+    "attempted": true,
+    "sent": true,
+    "error": "",
+    "transport": "webhook",
+    "eventids": [
+      "90005"
+    ]
+  },
+  "sop_usage": {}
+}
