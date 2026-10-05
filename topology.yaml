@@ -1,47 +1,37 @@
-# 本 lab 的物理拓扑。**这是版本化的实验室事实，不是运行时证据。**
+# Sample topology of the reference lab / 参考实验环境的拓扑
 #
-# ── aliases 是干嘛的 ──
+# This file is versioned lab fact, not runtime evidence: the agent reads it through the
+# `topology_neighbors` tool and the dashboard draws its topology page from it. The addresses
+# are documentation addresses (RFC 5737); replace them with your own.
+# 这是版本化的实验室事实，不是运行时证据：agent 通过 `topology_neighbors` 工具读它，
+# 看板的拓扑页也从它画。地址是文档保留段（RFC 5737），换成你自己的。
 #
-# 同一台设备在不同系统里叫不同名字：
-#   topology.yaml 里叫 V1        （网工画拓扑时的习惯叫法）
-#   Zabbix 里叫     V1-vios      （建主机时带上了平台后缀）
-#   设备自己的 hostname 又可能是第三种
+# Shape / 结构: three layers, 7 Cisco nodes, see docs/LAB.md
+#   core        V1, V2          (IOSv)     - routed, OSPF + a BGP session between them
+#   aggregation D1, D2          (IOSv)     - routed uplinks, bridge irb + BVI as VLAN gateways
+#   access      A1, A2, A3      (IOSv-L2)  - layer 2, management IP on the Vlan1 SVI
 #
-# 的端到端演示里，agent 拿着 Zabbix 给它的 "V2-vios" 来查拓扑，
-# 三次全部查空，V2 侧因此给出「低置信、需要人工介入」——而同一次故障
-# V1 侧是高置信的。**一个命名不一致，直接让半个故障判不出来。**
+# Fields / 字段:
+#   name        the name used in this file and in playbooks / 本文件和剧本里用的名字
+#   host        out-of-band management IP the agent connects to / agent 连接用的带外管理地址
+#   role        core | aggregation | access (drives the layered drawing / 决定分层绘制)
+#   aliases     other names for the same device, typically the Zabbix host name / 同一设备的其它名字，
+#               通常是 Zabbix 里的主机名
+#   links       local_interface <-> peer / peer_interface
 #
-# 所以别名必须显式登记。不做后缀剥离之类的模糊匹配：那是猜，猜错了
-# 没人知道；写在这里写错了是配置错误，看得见、改得动。
+# Why aliases are explicit / 为什么别名要显式写:
+#   The same device has different names in different systems: `V1` here, `V1-vios` in Zabbix,
+#   and possibly a third one as its own hostname. There is deliberately NO fuzzy matching
+#   (no suffix stripping): a guess that is wrong goes unnoticed, while a missing alias is a visible
+#   configuration error. When a lookup returns nothing the agent cannot tell the device from a
+#   typo, and that part of the incident ends up "low confidence, needs a human".
+#   同一台设备在不同系统里叫不同名字（这里 V1，Zabbix 里 V1-vios，设备自己的 hostname 可能还有
+#   第三种）。故意不做模糊匹配（比如去后缀）：猜错了没人知道，别名漏写却是看得见的配置错误。
+#   查不到时 agent 分不清「设备不存在」还是「名字写错」，那一侧的结论会落成「低置信、需要人工」。
 #
-# 加设备时记得把它在 Zabbix 里的主机名一并写进 aliases。
-#
-# ── 从 2 台扩到 8 台（A9 三层拓扑）──
-#
-# 核心两台沿用 V1/V2 原名，没有改成 C1/C2——V1/V2 在 Zabbix、playbooks、mock
-# 抓包等好几处已经被引用，改名影响面太大。D1/D2（汇聚）、A1~A3（接入）当时
-# 全部用 IOL 镜像（不是 vios/viosl2）：宿主物理内存实测只有 1.9~3.5GB 空闲，
-# 6 台 QEMU 类设备跑不起，IOL 是 dynamips，每台只要几十 MB。管理口 IP 接着
-# V1=.50/V2=.51 往下排到 .56。
-#
-# ── D1/D2/A1~A3 全部换成 vIOS/viosl2（收窄）──
-#
-# 起因：实测 IOL L2 不发 linkDown trap、IOL L3 连 `enable traps config`
-# 都被拒——拿一台做不了最基本 NMS 动作的设备写教程是残的。真机重新算过内存：
-# 之前记的「1.9~3.5GB 空闲」是当时某一刻的读数，不是天花板；宿主实际 16G，
-# 全部换完 `free -m` 显示 available 11171 MB，8 台 vIOS/viosl2 加现网 SRV/AR1
-# 全部进程 RSS 合计约 3.0 GB。**内存够，之前判断错了。**
-#
-# 接口名跟着镜像变了：D1/D2 是 vIOS（IOSv），A1~A3 是 viosl2，全系
-# GigabitEthernet0/x 命名（IOL 时代的 Ethernet0/x → GigabitEthernet0/x，
-# Ethernet1/x → GigabitEthernet0/(4+x)）。管理 IP 没变；-F
-# 又把接入层 Zabbix 主机名从 A1/A2/A3-iol 改成 A1/A2/A3-viosl2，跟镜像对齐。
-#
-# D1/D2 现在用经典 `bridge irb` + BVI 做 VLAN 网关（D1 的 BVI11 = 10.1.1.1/24，
-# D2 的 BVI13 = 10.1.3.1/24），接 SRV 的口在 A1/A2/A3 的 GigabitEthernet0/2
-# 上（A1/A2 access VLAN 11，A3 access VLAN 13）。SRV 本身不纳管，
-# topology.yaml 里不登记它的线缆——道理跟以前一样：登记了就会在拓扑图上
-# 多出一台查不到的设备。
+# Devices that are not managed (for example a test server behind the access layer) are not listed
+# here on purpose: listing one would draw a device on the topology page that cannot be queried.
+# 不纳管的设备（比如接入层后面的测试服务器）故意不登记：登记了拓扑页上就会多出一台查不到的设备。
 
 devices:
   - name: V1

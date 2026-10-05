@@ -6,7 +6,7 @@ A Zabbix alert comes in → an AI agent investigates with **read-only** tools �
 
 **告警驱动的只读 AI 网络排障，结论带原文证据。** Zabbix 告警进来 → AI 用**只读**工具取证 → 给出**结构化根因结论**，并引用它依据的原文 → 结果推到飞书卡片和网页看板。「引文是否真的出现在原始数据里」的核对代码随项目一起提供，在离线回放和回归里运行；在线流水线不跑它。
 
-[English](#english) · [中文](#中文) · [Install / 安装](docs/INSTALL.md) · [Architecture / 架构](docs/ARCHITECTURE.md) · [Playbooks / 剧本](docs/PLAYBOOK-FORMAT.md) · [Contributing / 贡献](CONTRIBUTING.md)
+[English](#english) · [中文](#中文) · [Install / 安装](docs/INSTALL.md) · [Architecture / 架构](docs/ARCHITECTURE.md) · [Playbooks / 剧本](docs/PLAYBOOK-FORMAT.md) · [Lab / 实验环境](docs/LAB.md) · [Contributing / 贡献](CONTRIBUTING.md)
 
 <p align="center">
   <img src="docs/images/architecture.png" alt="From alert to checkable conclusion / 从告警到可核对的结论" width="1000">
@@ -131,15 +131,19 @@ python -m uvicorn netops_ai.api.app:app --host 127.0.0.1 --port 8000      # open
 | `web/` | The dashboard (Vite + React + TypeScript) |
 | `tools/` | Replay demo, regression runner, rule/evidence reports, playbook lint, KB ingest |
 | `deploy/` | Zabbix via docker compose; SNMP-trap plumbing scripts for a **lab** (they write device/guest config — read first) |
-| `examples/`, `labs/` | Synthetic alert records; a few sanitized device captures |
+| `examples/`, `labs/` | Synthetic alert records; a few sanitized device captures; [lab description](docs/LAB.md) |
 | `tests/` | The test suite — no live devices, Zabbix or model required |
+
+## The reference lab
+
+"Lab-validated" means this: a 3-layer virtual network of 7 Cisco nodes (2 core + 2 aggregation IOSv, 3 access IOSv-L2) in EVE-NG, one Zabbix 7.0 server polling over SNMP and receiving traps, and faults injected by hand on the devices (interface shutdown, OSPF neighbor loss, BGP session shutdown, reload). No device image or device configuration is included. What it looks like and how to rebuild something similar: [docs/LAB.md](docs/LAB.md).
 
 ## Safety model, honestly
 
 - **Read-only is enforced twice, but it is only as good as your device account.** The whitelist is code; the device-side account is configuration you must get right and verify.
 - **The model is untrusted input.** Playbooks, model output and tool arguments all pass the whitelist; the whitelist never bends to them.
 - **Verification catches fabricated quotes, not wrong reasoning — and it does not run in the live pipeline** (see above).
-- **No authentication** on the webhook or the dashboard in this edition. Run them on a trusted network or behind an authenticating reverse proxy.
+- **No authentication** on the webhook or the dashboard in this edition. Keep uvicorn on `127.0.0.1` and publish it only through an authenticating reverse proxy (nginx example in [INSTALL.md](docs/INSTALL.md#securing-the-api-and-dashboard)); the Settings page can rewrite `.env`.
 - **Failed analyses are recorded, not retried.** If the LLM endpoint is down, the alert gets a record with `status: analysis_failed`.
 - Cisco IOS only; lab-validated; the sample topology and records are synthetic.
 
@@ -252,12 +256,16 @@ React 看板（`web/`）只读 JSON 接口。上方截图用的是三条合成�
 | `examples/`、`labs/` | 合成告警记录；少量脱敏的设备抓包 |
 | `tests/` | 测试——不需要在线设备、Zabbix 或模型 |
 
+## 参考实验环境
+
+「实验室验证过」指的是：EVE-NG 里一套三层、7 台 Cisco 节点的虚拟网络（2 台核心 + 2 台汇聚 IOSv，3 台接入 IOSv-L2），一台 Zabbix 7.0 通过 SNMP 轮询并接收 trap，故障是在设备上手工制造的（接口 shutdown、OSPF 邻居丢失、BGP 会话 shutdown、reload）。仓库不含任何设备镜像和设备配置。长什么样、怎么自己搭一个类似的：[docs/LAB.md](docs/LAB.md)。
+
 ## 安全模型（老实说）
 
 - **只读靠两层，但只和你的设备账号一样可靠。** 白名单是代码；设备侧账号是你必须配对并验证的配置。
 - **模型是不可信输入。** 剧本、模型输出、工具参数都要过白名单，白名单从不迁就它们。
 - **校验抓得住编造的引用，抓不住错误的推理——而且它不在在线流水线里**（见上）。
-- 本版本的 webhook 和看板**没有鉴权**，请放在可信网络里，或放在带认证的反向代理后面。
+- 本版本的 webhook 和看板**没有鉴权**，请让 uvicorn 只监听 `127.0.0.1`，通过带认证的反向代理对外（nginx 示例见 [INSTALL.md](docs/INSTALL.md#securing-the-api-and-dashboard)）；设置页可以改写 `.env`。
 - **失败的分析只记录、不重试。** 大模型接口连不上时，这条告警会得到一条 `status: analysis_failed` 的记录。
 - 仅支持 Cisco IOS；只在实验室验证过；示例拓扑和记录是合成的。
 
