@@ -618,7 +618,7 @@ def build_overview(alerts: list[dict], incidents: list[dict]) -> dict:
             # 这个项目最值钱的就是不硬给结论，措辞可以柔和，事实不能含糊。
             {"key": "undetermined", "label": "需人工介入", "value": len(low), "sub": f"占 {round(len(low) / max(len(incidents), 1) * 100)}%，判不出时如实转人工，不硬给结论",
              "ratio": round(len(low) / max(len(incidents), 1), 3)},
-            # 证据核对旁路（pipeline.EVIDENCE_VERIFY_ENABLED=False）后没有分母，这张卡不显示，不拿 0/0 冒充核过。
+            # 证据核对不在线上跑后没有分母，这张卡不显示，不拿 0/0 冒充核过。
             *([{"key": "evidence", "label": "证据逐字核过", "value": f"{ver_ok}/{ver_total}", "sub": "核不过不许发",
                "ratio": round(ver_ok / ver_total, 3)}] if ver_total else []),
             {"key": "denied", "label": "被白名单拦下的命令", "value": len(denials), "sub": "一条都没发给设备"},

@@ -23,9 +23,7 @@ from functools import partial
 from pathlib import Path
 
 from netops_ai.analysis.analyzer import _with_derived_confidence
-from netops_ai.analysis.schema import HYPOTHESIS_CATEGORIES, ROLE_ROOT, check_business_rules, normalize_enum
-from netops_ai.analysis.verify import summarize, verify_evidence
-from netops_ai.analysis.doc_blocks import document_paragraphs, without_document_paragraphs
+from netops_ai.analysis.schema import HYPOTHESIS_CATEGORIES, ROLE_ROOT, normalize_enum
 from netops_ai.devices.base import CommandResult
 from netops_ai.devices.ssh import SSHDeviceAdapter
 from netops_ai.devices.telnet import TelnetDeviceAdapter
@@ -534,23 +532,6 @@ def _redact_env_values(text: str, env: dict | None = None) -> str:
     return redacted
 
 
-#: 业务规则（`analysis/schema.py::check_business_rules`：反证必须来自故障窗口、没找到不算反证、
-#: 故障是否已结束的启发式判断……）**维护者拍板下线**：这套规则是旧架构（取证和研判分两次调用、
-#: 研判看不到取证过程）时打的补丁，用来在事后拦模型「凭空排除方向」。取证和结论合成一条轨迹之后，
-#: 结论依据的就是轨迹里的原文，逐字核对已经兜住幻觉；这些规则反而制造误报（里 14/14 条都被判违规，
-#: 其中不少是故障还在进行时被误判「已结束」）。代码留在 schema.py 备查，要恢复把这个开关改回 True。
-BUSINESS_RULES_ENABLED = False
-
-#: 证据逐字核对（`analysis/verify.py::verify_evidence`）**维护者拍板旁路**：它只能查「引文是不是原文里连续出现的一段」，
-#: 查不了结论对不对；真机 29 条证据里 8 条没过，其中 3 条是模型把不相连的几行拼成一段（每行都真，整段不连续），
-#: 白白在飞书卡片上冒「N 处需要核实」。关掉之后 `evidence_verification` 为空，卡片不出警告，仪表盘不出核对卡。
-#: 代码和 `verify.py` 留着备查，要恢复把这个开关改回 True。巡检建议（inspection/advise.py）那条路自己核对，不受影响。
-EVIDENCE_VERIFY_ENABLED = False
-
-
-def _flag_on(name: str, default: bool) -> bool:
-    """模块常量为 False 时，仍可用环境变量 `<name>=1` 临时打开（运行时读取，.env 加载晚于 import 也没关系）。"""
-    return default or os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
 @dataclass
@@ -1348,35 +1329,6 @@ def _process_incident_batch_inner(hostid: str, alerts: list, *, followup_hint: s
     if diagnostic.analysis:
         analysis_parsed = _with_derived_confidence(diagnostic.analysis)
         analysis_trace = diagnostic.analysis_trace or {"from": "agent_loop_final_schema"}
-        try:
-            if _flag_on("BUSINESS_RULES_ENABLED", BUSINESS_RULES_ENABLED):
-                business_rule_violations = check_business_rules(
-                    analysis_parsed,
-                    f"{combined_zabbix_text}\n\n{source_text}" if diagnostic.transcript else source_text,
-                )
-            if _flag_on("EVIDENCE_VERIFY_ENABLED", EVIDENCE_VERIFY_ENABLED) and isinstance(analysis_parsed.get("evidence"), list):
-                # 合并成一条轨迹后不再有「监控/设备」两份分开的输入：模型看到的是「监控原文 + 整条工具轨迹」一整份。
-                # 两个来源池都用这一整份核对（真机：只给轨迹会让引用告警原文的引文全判找不到，
-                # 而 device 池传 None 会让设备来源的引文全判「没喂这份输入」，逐字核对 78% -> 18%）。
-                pool = f"{combined_zabbix_text}\n\n{diagnostic.transcript}" if diagnostic.transcript else source_text
-                device_pool = without_document_paragraphs(pool)
-                document_pool = document_paragraphs(pool)
-                v = verify_evidence(analysis_parsed["evidence"], device_pool, device_pool, document_pool)
-                evidence_verification = {
-                    "summary": summarize(v),
-                    "details": [
-                        {
-                            "index": r.index,
-                            "verified": r.verified,
-                            "grade": r.grade,
-                            "source_from": r.source_from,
-                            "reason": r.reason,
-                        }
-                        for r in v
-                    ],
-                }
-        except Exception:  # noqa: BLE001 — 校验挂了不该把已经拿到的结论丢掉
-            analysis_error = traceback.format_exc()
     else:
         analysis_error = (
             diagnostic.analysis_error

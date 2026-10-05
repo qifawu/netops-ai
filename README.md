@@ -2,9 +2,9 @@
 
 **Alert-driven, read-only AI network troubleshooting — with evidence you can check.**
 
-A Zabbix alert comes in → an AI agent investigates with **read-only** tools → it writes a **structured root-cause conclusion** → every piece of evidence can be **mechanically checked against the raw data it claims to quote** (opt-in in the live pipeline, always on in replay) → the result lands on a Feishu card and a web dashboard.
+A Zabbix alert comes in → an AI agent investigates with **read-only** tools → it writes a **structured root-cause conclusion** that quotes the evidence it relied on → the result lands on a Feishu card and a web dashboard. The evidence-checking code (does each quote really appear in the raw data?) ships with the project and runs in offline replay and regression; the live pipeline does not run it.
 
-**告警驱动的只读 AI 网络排障，证据可核查。** Zabbix 告警进来 → AI 用**只读**工具取证 → 给出**结构化根因结论** → 每条证据都可以和它声称引用的**原始数据逐字核对**（在线流水线里默认关闭、需手动开启；离线回放始终开启）→ 结果推到飞书卡片和网页看板。
+**告警驱动的只读 AI 网络排障，结论带原文证据。** Zabbix 告警进来 → AI 用**只读**工具取证 → 给出**结构化根因结论**，并引用它依据的原文 → 结果推到飞书卡片和网页看板。「引文是否真的出现在原始数据里」的核对代码随项目一起提供，在离线回放和回归里运行；在线流水线不跑它。
 
 [English](#english) · [中文](#中文) · [Install / 安装](docs/INSTALL.md) · [Architecture / 架构](docs/ARCHITECTURE.md) · [Playbooks / 剧本](docs/PLAYBOOK-FORMAT.md) · [Contributing / 贡献](CONTRIBUTING.md)
 
@@ -27,7 +27,7 @@ A Zabbix alert comes in → an AI agent investigates with **read-only** tools �
 Most "AI for NetOps" demos let a model run commands and write a confident paragraph. Two things go wrong in practice: the model may touch the device, and the paragraph may quote evidence that was never there. This project is built around refusing both:
 
 1. **It cannot change anything.** There is no code path that writes configuration. Device access is guarded twice: an in-code command whitelist (only full `show …` commands, no abbreviations, no pipes to anything but `include/exclude/begin/section/count`, no shell metacharacters) **and** a read-only account on the device. Either layer alone is not enough.
-2. **Evidence must be verbatim.** The model must attach to each claim the exact text it saw. `netops_ai/analysis/verify.py` looks that text up in the raw Zabbix / device output and grades it `verbatim`, `cross_source`, `reformatted` or `fabricated`. The conclusion may be the model's; the line that supports it may not. *(In the live pipeline this check is **off by default** — see [the note below](#evidence-must-be-verbatim).)*
+2. **Evidence must be quotable.** The model must attach to each claim the exact text it saw. `netops_ai/analysis/verify.py` can look that text up in the raw Zabbix / device output and grade it `verbatim`, `cross_source`, `reformatted` or `fabricated` — used by the offline replay and regression tools (see [the note below](#evidence-must-be-verbatim)).
 3. **"I can't tell" is a valid answer.** The output schema forces the model to state, for each of six hypothesis families (local action, local hardware/resource, remote/upstream, link/path quality, management plane/reachability, monitoring/collection artifact), whether it is supported, ruled out (with counter-evidence) or undetermined — and to say what data and which command would settle the undetermined ones. Business rules (opt-in, see above) reject self-contradictory output (e.g. `confidence: high` with unresolved hypotheses).
 
 ## Try it in one minute
@@ -53,10 +53,10 @@ This replays three **synthetic** alert records through the same verification, bu
 2. **Collect & merge.** Alerts that arrive close together are held for a short window (`ALERT_WINDOW_*` in `.env`) and merged into **one incident** so a link failure with ten consequence alerts produces one conclusion, not ten.
 3. **Investigate.** One tool-calling loop with a token budget, call limits, duplicate-call interception and a no-progress abort. The agent chooses which read-only tools to call — Zabbix queries, `show` commands through the whitelist, topology neighbors, SOP lookup, local documentation search.
 4. **Conclude.** The model must fill a strict JSON schema (root cause, headline, confidence, evidence items, six-family hypothesis checklist, unresolved candidates, per-alert roles).
-5. **Verify (opt-in).** Every evidence quote is looked up in the raw data and graded; business rules reject contradictions. Both are **off by default** in the live pipeline (set `EVIDENCE_VERIFY_ENABLED=1` / `BUSINESS_RULES_ENABLED=1` in `.env`); `tools/demo_replay.py` and the regression tools always run them.
-6. **Report.** A Feishu card (with warnings for anything that failed verification) and a record on disk that the dashboard reads.
+5. **Report.** A Feishu card and a record on disk that the dashboard reads.
 
-Steps 5–6 are plain deterministic code, which is why they can be replayed offline. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+Evidence checking (`verify.py`) and the business rules are plain deterministic code that runs on saved records (offline replay, regression, tests), not in this live path. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## The two-layer read-only guard
 
@@ -72,7 +72,7 @@ Layer 1 is code (`netops_ai/devices/whitelist.py`, evaluated inside `DeviceAdapt
   <img src="docs/images/evidence.png" alt="Evidence verification / 证据逐字核对" width="1000">
 </p>
 
-The grades are `verbatim` (found as-is in the named source), `cross_source` (found, but in the other source), `reformatted` (found after whitespace/markup normalization) and `fabricated` (not found). Items that fail are shown on the card, never silently dropped. **Why it is off by default:** in live runs against real devices the check produced too many false alarms — models often join several separate lines into one quote (each line is real, the joined text is not contiguous) — so the maintainers switched it off for the card and dashboard. The code is kept and tested; turn it on with `EVIDENCE_VERIFY_ENABLED=1` (and `BUSINESS_RULES_ENABLED=1` for the contradiction rules). Verification catches fake quotes, **not** bad reasoning: a conclusion can be fully verbatim-backed and still wrong, so treat the output as a prioritized lead, not a verdict.
+The grades are `verbatim` (found as-is in the named source), `cross_source` (found, but in the other source), `reformatted` (found after whitespace/markup normalization) and `fabricated` (not found). **This check is not part of the live alert pipeline:** on real devices it produced too many false alarms — models often join several separate lines into one quote (each line is real, the joined text is not contiguous). It is kept for offline replay, regression and the tests. Verification catches fake quotes, **not** bad reasoning: a conclusion can be fully verbatim-backed and still wrong, so treat the output as a prioritized lead, not a verdict.
 
 ## Dashboard tour
 
@@ -89,7 +89,7 @@ Chinese interface: [overview](docs/images/ui-overview.png), [command audit](docs
 
 - **Alert pipeline** — webhook, merge window, incident de-duplication, investigation, structured conclusion, Feishu card.
 - **Read-only device access** — SSH and Telnet adapters behind the command whitelist; Zabbix API behind a method whitelist.
-- **Checkable conclusions** — verbatim evidence grading and business rules (opt-in live, always on in replay), six-family hypothesis checklist, "can't tell" with a concrete next step.
+- **Checkable conclusions** — evidence quotes that can be graded against the raw data (offline replay and regression), six-family hypothesis checklist, "can't tell" with a concrete next step.
 - **Playbooks (SOP)** — YAML decision trees that *advise* the agent (they never execute); a linter checks every step uses a real read-only tool and a whitelisted command. Three examples included: `interface-link-down`, `ospf-adjacency`, `bgp-session` ([format](docs/PLAYBOOK-FORMAT.md)).
 - **Inspection before anything alerts** — trend detectors on Zabbix history (sustained drift, periodic spikes, self-healing flaps) plus read-only live status checks (interface state, OSPF/BGP neighbors, error-counter growth) with the device's own output as evidence; optional AI advice with verified citations; history, diff against the last run, Markdown/HTML export.
 - **Command audit** — every command and every refusal, per device.
@@ -138,7 +138,7 @@ python -m uvicorn netops_ai.api.app:app --host 127.0.0.1 --port 8000      # open
 
 - **Read-only is enforced twice, but it is only as good as your device account.** The whitelist is code; the device-side account is configuration you must get right and verify.
 - **The model is untrusted input.** Playbooks, model output and tool arguments all pass the whitelist; the whitelist never bends to them.
-- **Verification catches fabricated quotes, not wrong reasoning — and it is off by default in the live pipeline** (see above).
+- **Verification catches fabricated quotes, not wrong reasoning — and it does not run in the live pipeline** (see above).
 - **No authentication** on the webhook or the dashboard in this edition. Run them on a trusted network or behind an authenticating reverse proxy.
 - **Failed analyses are recorded, not retried.** If the LLM endpoint is down, the alert gets a record with `status: analysis_failed`.
 - Cisco IOS only; lab-validated; the sample topology and records are synthetic.
@@ -168,7 +168,7 @@ Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Contribution
 很多「AI 运维」演示是让模型登设备跑命令，再写一段笃定的结论。实际会出两个问题：模型可能动设备；结论里引的「证据」可能根本不存在。本项目围绕**拒绝这两件事**设计：
 
 1. **它什么都改不了。** 代码里没有任何写配置的路径。设备访问有两层守卫：代码里的命令白名单（只放行写全的 `show …` 命令，不认缩写，管道后只允许 `include/exclude/begin/section/count`，拒绝一切 shell 元字符）**加上**设备侧的只读账号。单靠任何一层都不够。
-2. **证据必须逐字。** 模型给每条结论附上它看到的原文，`netops_ai/analysis/verify.py` 去 Zabbix / 设备原始输出里核对，分 `verbatim`（逐字）、`cross_source`（跨来源）、`reformatted`（重排版）、`fabricated`（编造）四级。结论可以是模型写的，支撑它的那句原话不许是。（在线流水线里这项核对**默认关闭**，见[下文](#证据必须逐字)。）
+2. **证据必须可引用。** 模型给每条结论附上它看到的原文，`netops_ai/analysis/verify.py` 可以去 Zabbix / 设备原始输出里核对，分 `verbatim`（逐字）、`cross_source`（跨来源）、`reformatted`（重排版）、`fabricated`（编造）四级——供离线回放和回归工具使用，见[下文](#证据必须逐字)。
 3. **「判不出」是合法答案。** 输出结构强制模型对六类假设（本端有人动过配置、本机硬件或资源、对端或上游、链路或路径质量、管理面或可达性、监控采集自身问题）逐个表态：有证据支持 / 已排除（必须给反证）/ 暂时无法判断，并说明还差什么数据、用什么命令去拿。业务规则（默认关闭，见下）会拒绝自相矛盾的输出（例如置信度写 high、清单里却还有没排除的方向）。
 
 ## 一分钟体验
@@ -190,10 +190,10 @@ python tools/demo_replay.py
 2. **收集与合并。** 时间上靠近的告警会在一个短窗口内（`.env` 里的 `ALERT_WINDOW_*`）攒起来合并成**一个事件**——一条链路故障带出十条连带告警，只产出一个结论，不是十个。
 3. **取证。** 一个工具循环：有 token 预算、调用次数上限、重复调用拦截和无进展中止。agent 自己决定调哪些只读工具——Zabbix 查询、过白名单的 `show` 命令、拓扑邻居、剧本查询、本地文档检索。
 4. **结论。** 模型必须填一份严格的 JSON schema（根因、短标题、置信度、证据、六类假设清单、分不开的候选、每条告警的角色）。
-5. **核对（可选）。** 每条证据引用都到原始数据里查找并分级；业务规则拒绝矛盾输出。两项在在线流水线里**默认关闭**（`.env` 里设 `EVIDENCE_VERIFY_ENABLED=1` / `BUSINESS_RULES_ENABLED=1` 开启）；`tools/demo_replay.py` 和回归工具始终会跑。
-6. **上报。** 飞书卡片（核对没过的会带警告）和一份落盘记录，看板读这份记录。
+5. **上报。** 飞书卡片和一份落盘记录，看板读这份记录。
 
-第 5、6 步是确定性代码，所以能离线重放。详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+
+证据核对（`verify.py`）和业务规则是确定性代码，对已保存的记录跑（离线回放、回归、测试），**不在**这条在线链路里。详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 两层只读守卫
 
@@ -201,7 +201,7 @@ python tools/demo_replay.py
 
 ## 证据必须逐字
 
-图见上方英文部分（[evidence.png](docs/images/evidence.png)）。四个等级：`verbatim`（在标注的来源里原样找到）、`cross_source`（找到了，但在另一个来源里）、`reformatted`（归一化空白/排版后找到）、`fabricated`（哪里都找不到）。开启后，核不过的证据显示在卡片上，不会被悄悄丢掉。**为什么默认关闭：** 真机实测误报偏多——模型常把几行不相连的原文拼成一条引用（每行都真，拼起来整段不连续），所以维护者把卡片和看板上的核对关掉了。代码和测试都留着，在 `.env` 里设 `EVIDENCE_VERIFY_ENABLED=1`（业务规则同理 `BUSINESS_RULES_ENABLED=1`）即可开启。校验抓的是编造的引用，**抓不了**错误的推理：全部逐字的结论也可能是错的，把输出当成有优先级的线索，不是裁决。
+图见上方英文部分（[evidence.png](docs/images/evidence.png)）。四个等级：`verbatim`（在标注的来源里原样找到）、`cross_source`（找到了，但在另一个来源里）、`reformatted`（归一化空白/排版后找到）、`fabricated`（哪里都找不到）。**这项核对不在在线告警流水线里：** 真机上误报偏多——模型常把几行不相连的原文拼成一条引用（每行都真，拼起来整段不连续）。它保留给离线回放、回归和测试使用。校验抓的是编造的引用，**抓不了**错误的推理：全部逐字的结论也可能是错的，把输出当成有优先级的线索，不是裁决。
 
 ## 看板巡礼
 
@@ -216,7 +216,7 @@ React 看板（`web/`）只读 JSON 接口。上方截图用的是三条合成�
 
 - **告警流水线** — webhook、合并窗口、事件去重、取证、结构化结论、飞书卡片。
 - **只读设备访问** — SSH / Telnet 适配器在命令白名单之后；Zabbix API 在方法白名单之后。
-- **可核对的结论** — 证据逐字分级和业务规则（在线流水线可选开启，离线回放始终开启）、六类假设清单、「判不出」时给出具体的下一步。
+- **可核对的结论** — 证据引文可以对照原始数据分级（离线回放和回归）、六类假设清单、「判不出」时给出具体的下一步。
 - **剧本（SOP）** — YAML 决策树，只给 agent **建议**（从不执行）；linter 检查每一步用的是真实的只读工具和过白名单的命令。附三个示例：`interface-link-down`、`ospf-adjacency`、`bgp-session`（[格式规范](docs/PLAYBOOK-FORMAT.md)）。
 - **告警之前的巡检** — 趋势检测（持续单向变化、周期性冲高、反复抖动又自愈，读 Zabbix 历史）+ 只读登设备的状态检查（接口状态、OSPF/BGP 邻居、错误计数增长，证据是设备原话）；可选的 AI 处置建议（引文同样逐字核对）；历史、与上次对比、Markdown/HTML 导出。
 - **命令审计** — 每条命令、每次拒绝，按设备列出。
@@ -256,7 +256,7 @@ React 看板（`web/`）只读 JSON 接口。上方截图用的是三条合成�
 
 - **只读靠两层，但只和你的设备账号一样可靠。** 白名单是代码；设备侧账号是你必须配对并验证的配置。
 - **模型是不可信输入。** 剧本、模型输出、工具参数都要过白名单，白名单从不迁就它们。
-- **校验抓得住编造的引用，抓不住错误的推理——而且在线流水线里默认是关的**（见上）。
+- **校验抓得住编造的引用，抓不住错误的推理——而且它不在在线流水线里**（见上）。
 - 本版本的 webhook 和看板**没有鉴权**，请放在可信网络里，或放在带认证的反向代理后面。
 - **失败的分析只记录、不重试。** 大模型接口连不上时，这条告警会得到一条 `status: analysis_failed` 的记录。
 - 仅支持 Cisco IOS；只在实验室验证过；示例拓扑和记录是合成的。

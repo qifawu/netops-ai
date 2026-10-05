@@ -121,7 +121,7 @@ class TestProcessIncidentBatch(unittest.TestCase):
         self.assertEqual(saved["eventid"], "999")
         self.assertEqual(saved["analysis_parsed"]["root_cause"], "x")
         self.assertEqual(saved["business_rule_violations"], [])
-        # 证据逐字核对已旁路（EVIDENCE_VERIFY_ENABLED=False）：不再产出核对结果，卡片也就没有「需核实」警告。
+        # 证据逐字核对不在线上跑：不再产出核对结果，卡片也就没有「需核实」警告。
         self.assertIsNone(saved["evidence_verification"])
         self.assertTrue(saved["incident_id"])
         self.assertEqual(saved["incident_role"], "root")
@@ -234,24 +234,6 @@ class TestProcessIncidentBatch(unittest.TestCase):
         self.assertEqual(saved["status"], "analysis_failed")
         mock_report.assert_not_called()
 
-    @mock.patch("netops_ai.api.pipeline.BUSINESS_RULES_ENABLED", True)  # 规则默认已下线，这条测的是开关打开时行为不变
-    @mock.patch("netops_ai.api.pipeline.report_alert_group")
-    @mock.patch("netops_ai.api.pipeline.fetch_diagnostic_context")
-    def test_业务规则违反被检出并记录(self, mock_diag, mock_report):
-        mock_diag.return_value = pipeline.DiagnosticContextResult(text="设备文本")
-        bad = _good_analysis()
-        bad["confidence"] = "high"
-        bad["undistinguishable_candidates"] = [
-            {"candidates": ["a", "b"], "why_indistinguishable": "w", "what_data_would_help": "d"}
-        ]
-        mock_diag.return_value.analysis = bad
-        mock_diag.return_value.transcript = "some text 轨迹原文"
-        mock_report.return_value = {"attempted": True, "sent": True, "error": "", "transport": "app"}
-
-        pipeline._process_incident_batch("10683", [_pending("1002")])
-
-        saved = json.loads((Path(self.tmp.name) / "alert-1002.json").read_text(encoding="utf-8"))
-        self.assertTrue(saved["business_rule_violations"])
 
     @mock.patch("netops_ai.api.pipeline.report_alert_group")
     @mock.patch("netops_ai.api.pipeline.fetch_diagnostic_context")
