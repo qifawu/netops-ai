@@ -1,6 +1,8 @@
-# Architecture / 架构
+# Architecture
 
-This document describes how an alert becomes a checkable conclusion, and why the pieces are shaped the way they are. Chinese summary at the end.
+**English** | [简体中文](ARCHITECTURE.zh-CN.md)
+
+This document describes how an alert becomes a checkable conclusion, and why the pieces are shaped the way they are.
 
 ## The alert pipeline
 
@@ -24,7 +26,7 @@ Zabbix trigger ──► POST /webhooks/zabbix ──► 200 immediately (Zabbix
                  dashboard reads the records (netops_ai/api/dashboard.py → web/)
 ```
 
-Everything after the model has spoken (steps 4–6) is deterministic code, which is why it can be replayed offline — see `tools/demo_replay.py`.
+Everything after the model has spoken (the report step) is deterministic code, which is why it can be replayed offline — see `tools/demo_replay.py`.
 
 ## The tools the agent can use
 
@@ -85,15 +87,3 @@ An optional model call turns findings into "what to handle tonight / what to ign
 - When something fails, say why. Fallbacks (e.g. an unreachable inventory source) record the reason instead of silently using older data.
 - Don't guess: unknown vendors raise, and a model with no known price gets no cost estimate rather than an invented one.
 - Tests must not touch real records, ledgers or credentials. The test package redirects these to temp locations before anything imports.
-
----
-
-## 中文摘要
-
-**告警管道**：Zabbix 触发 → `POST /webhooks/zabbix` 立刻返回 200（Zabbix webhook 60 秒硬超时）→ 后台任务：①收集窗口（短时间内的相关告警合并成一个事件）②取证（一个带只读工具的工具循环）③结论（严格 schema 的结构化输出）④飞书卡片 + 落盘记录 → 看板读取记录。
-
-**两层只读**：①命令白名单（`devices/whitelist.py`）：只放行写全的命令，不认缩写，先查禁令再查放行，管道后只允许 `include/exclude/begin/section/count`，拒绝 shell 元字符/控制字符/非 ASCII/超过 200 字符，`ping`/`traceroute` 默认关闭；在 `DeviceAdapter.run()` 里判断，被拒的命令根本不会发出。②设备侧只读账号（代码替你保证不了；IOS 上 `enable` 没设 secret 时低权限等级不是边界，要在真实 VTY 上验证写命令被拒）。Zabbix 客户端同样先过方法白名单。
-
-**结构化结论**：六类假设逐个表态（有证据支持 / 已排除且必须给直接反证 / 暂时无法判断）；多个方向分不开时必须写清为什么分不开、还差什么数据、具体用什么命令拿、谁去拿。
-
-**工具循环**：唯一的一个，带 token 预算（一跳做完才检查，所以上限是软的，最多超冲一跳）、重复调用拦截、无进展中止、可选缓存和收尾调用。**剧本**只是给 agent 的建议（`sop_lookup`），引擎不执行步骤，实际用了哪几步记为 `sop_usage`。**巡检**分趋势巡检（只读 Zabbix 历史，三类纯函数检测器）和状态巡检（只读登设备，固定规则，证据是设备原话）。

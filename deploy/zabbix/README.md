@@ -1,4 +1,6 @@
-# Zabbix 7.0 for the lab / 实验用 Zabbix
+# Zabbix 7.0 for the lab
+
+**English** | [简体中文](README.zh-CN.md)
 
 `docker-compose.yml` starts a Zabbix **7.0 LTS** server (PostgreSQL, server, web UI, agent2 and an SNMP-trap receiver) so you can try netops-ai without an existing Zabbix. 7.0 is an LTS release; pick the current LTS if you read this later.
 
@@ -24,7 +26,3 @@ It logs in, reads real hosts/items/history and checks that the answers are real 
 ## Next
 
 Add your devices as Zabbix hosts (SNMP template such as *Cisco IOS by SNMP*), then wire the alert webhook — see [../../docs/INSTALL.md](../../docs/INSTALL.md#33-zabbix--webhook). For SNMP traps instead of polling, see `deploy/trap/`.
-
----
-
-`docker-compose.yml` 起一套 Zabbix **7.0 LTS**（PostgreSQL + server + web + agent2 + SNMP trap 接收），没有现成 Zabbix 也能试。启动：设好 `POSTGRES_*` 环境变量后 `docker compose up -d`。Zabbix 自带 `Admin` 账号，**立刻改密码**，再给 netops-ai 单独建一个**只读**用户。用 `verify_api.py` 验证：它会真读主机/监控项/历史，确认拿到的是真数据不是空列表——**先验再接**。之后把设备加成 Zabbix 主机、接 webhook（见 INSTALL.md）。

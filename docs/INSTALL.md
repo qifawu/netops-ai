@@ -1,6 +1,8 @@
-# Install & run / 安装与跑通指南
+# Install & run
 
-Three levels, each works without the next: **(1)** tests and the offline replay demo — nothing external needed; **(2)** the web dashboard against sample data; **(3)** the full pipeline against Zabbix, devices and an LLM. 中文版在文末。
+**English** | [简体中文](INSTALL.zh-CN.md)
+
+Three levels, each works without the next: **(1)** tests and the offline replay demo — nothing external needed; **(2)** the web dashboard against sample data; **(3)** the full pipeline against Zabbix, devices and an LLM.
 
 ## Requirements
 
@@ -144,23 +146,3 @@ Trigger a test: `curl -X POST http://127.0.0.1:8000/webhooks/zabbix -H 'content-
 | Analysis says "connection error" | LLM endpoint unreachable — run `tools/llm_doctor.py`. Failed analyses are recorded with `status: analysis_failed` and are **not retried automatically** |
 | Everything "unknown host" | Alias missing in `topology.yaml` — add the Zabbix host name as an alias |
 | Commands rejected | Working as intended — check the audit page for the denial reason |
-
----
-
-## 中文版
-
-**三个层级，互不依赖**：①测试 + 离线回放（不需要任何外部东西）；②网页看板；③完整链路（Zabbix + 设备 + 大模型）。
-
-**①** Python 3.13；`python -m venv .venv`，激活后 `pip install -r requirements.txt`；`python -m pytest tests -q`；`python tools/demo_replay.py`（`--card` 同时打印飞书卡片）。预期：打印 6 条记录和一行汇总（`汇总：6 条记录。`）；其中几条老实说「判不出」并写明还差什么，卡片不是绿色。
-
-**②** `cd web && npm ci && npm run build`，（可选）回到根目录跑 `python tools/seed_demo.py` 灌入 6 条合成告警让看板有数据，回到根目录 `python -m uvicorn netops_ai.api.app:app --host 127.0.0.1 --port 8000`，打开 `http://127.0.0.1:8000`。**接口和看板没有鉴权，只绑本机，或放在带认证的反向代理后面。**
-
-**保护接口和看板**：谁能访问端口，谁就能看告警结论，而且「系统设置」页能改写 `.env`（密钥在页面上是掩码，但 webhook 地址、模型地址是可改的）。所以：①uvicorn 始终用 `--host 127.0.0.1`，只通过带认证的反向代理对外；②Zabbix 没法在浏览器里输密码，所以 `/webhooks/zabbix` 单独放出来，用来源地址限制代替密码。nginx 示例见上文英文部分（`location /` 加 `auth_basic`，`location = /webhooks/zabbix` 里 `allow` 你的 Zabbix 服务器地址再 `deny all`）。这样 Zabbix 媒介类型的 `url` 填代理的地址，API 进程本身一直只监听本机。换成别的代理也守同样两条：除 webhook 外一律要认证，webhook 按来源地址限制。
-
-**参考实验环境**：长什么样（7 台 Cisco、Zabbix、trap、制造过哪些故障）以及怎么自己搭一个类似的，见 [LAB.md](LAB.md)。
-
-**自检命令**（第 ③ 层配置前后都能跑）：`python -c "from netops_ai.devices.whitelist import check; print(check('cisco','show version').allowed, check('cisco','configure terminal').allowed)"` 应打印 `True False`；`python zbx-cli.py hosts` 验证 Zabbix 只读访问；`python tools/llm_doctor.py` 验证大模型链路；`curl -X POST http://127.0.0.1:8000/webhooks/zabbix -H 'content-type: application/json' -d '{"eventid":"1","name":"Interface Gi0/1(): Link down","host":"A1"}'` 发一条测试告警，会在 `records/alert-1.json` 生成记录（没配的部分会带错误信息）并出现在看板上。
-
-**③** `cp env.example .env` 后填写（也可以在看板「系统设置」页改，密钥只掩码显示）：Zabbix 用只读账号；设备账号**必须是只读账号**，并且要在**真实 VTY** 上验证写命令被拒（IOS 上 `enable` 没设 secret 时低权限用户可以无密码进特权模式，所以要设 `enable secret`；别拿 EVE-NG 的 console 代理来测，那条线不走 VTY 的登录规则）；`topology.yaml` 里**别名要显式写**，没有模糊匹配。Zabbix 侧建一个 **webhook 媒介类型**，把 `{EVENT.ID}/{EVENT.NAME}/…` 包成 JSON `POST http://<api>:8000/webhooks/zabbix`（只有 `eventid`、`name` 必填），再建一个触发器 action 发给它。实验室里踩过的坑：API 建的媒介类型**默认是禁用的**（`status: 0` 才启用），否则第一条告警静默丢失；API 进程不能只绑 `127.0.0.1`；Zabbix webhook 60 秒超时，接口立即返回、后台分析。
-
-失败的分析会记成 `status: analysis_failed`，**不会自动重试**。文档检索索引随仓库是空的，自己用 `tools/kb_ingest.py` 灌你有权使用的文档，`doc_search` 工具就能检索到（结果会标成厂商文档，不会当作设备证据）。

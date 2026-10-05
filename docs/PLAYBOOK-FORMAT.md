@@ -1,4 +1,6 @@
-# Playbook (SOP) format / 剧本格式规范
+# Playbook (SOP) format
+
+**English** | [简体中文](PLAYBOOK-FORMAT.zh-CN.md)
 
 A playbook is a YAML file in `playbooks/` that tells the investigating agent *where to look next* for a known class of alert. **It is advice, not automation**: `sop_lookup` returns the matching playbook; the engine never executes a step. The agent still calls tools itself, and what it actually did is recorded as `sop_usage` in the alert record (which steps ran, which were skipped, deviations). If a playbook contradicts what the device or monitoring says, the evidence wins.
 
@@ -85,19 +87,3 @@ Instead of a literal command a step can name an *intent* (`intent: interface_sta
 4. Add at most two or three follow-up steps. Keep it small: a playbook is a hint for the agent, not a script.
 5. Run `python tools/sop_lint.py playbooks/my-playbook.yaml`. It rejects unknown tools, wrong parameter names, commands the whitelist would refuse, and steps the runtime could not tell apart.
 6. Send an alert with that trigger name to the webhook (see [INSTALL.md](INSTALL.md)) and look at `sop_usage` in the record to see which steps the agent actually used.
-
----
-
----
-
-## 中文摘要
-
-剧本是 `playbooks/` 下的 YAML，告诉取证的 agent「这类告警下一步该往哪儿看」。**它是建议，不是自动化**：`sop_lookup` 返回命中的剧本，引擎从不执行步骤；agent 仍然自己调工具，实际走了哪几步记成告警记录里的 `sop_usage`。剧本和设备/监控的实测矛盾时，以证据为准。
-
-- **顶层**：`name`、`description`、`applicability`、`limits`（`max_main_steps` 默认 5、`max_tokens` 默认 1500）、`match`（`vendor` 对不上直接出局；`trigger_name_contains` 告警名子串；`tags` 仅在告警带 tag 时才强制）、`start`、`steps`。
-- **步骤**：`id`、`why`、`expect`、`main`、`action{tool, …}`、`branches[{when, goto}]`、`provenance`。
-- **分支条件**只有四种：`default`、`error`、`output_contains('…')`、`value ==/!= …`；未知表达式按 false，后面的 `default` 照常兜底。特殊去向 `__ai__`（交回给模型）、`__end__`（剧本结束）。
-- **动作工具**：`device`（只读 `show` 命令）、`zabbix_history`、`zabbix_reachability`、`topology_neighbors`、`zbx_syslog`、`zbx_items`；参数名必须是该工具的真实参数名。`python tools/sop_lint.py` 会逐个核对，并确认每条渲染出来的设备命令都能过白名单——剧本不可能夹带闸门会拒的命令。
-- **占位符**：`{alert_interface}`、`{alert_window_from/to}`、`{alert_log_prefix}`；`<接口>`、`<对端地址>` 留给 agent 运行时填。**意图步骤**用 `intent:` 引用 `playbooks/catalog/cisco_ios.yaml` 里的命令目录。
-
-**十分钟写一个自己的剧本**：①挑一条常见告警，记下它的 Zabbix 触发器名，填进 `match.trigger_name_contains`；②复制 `playbooks/device-reload.yaml`（最短的一个）改 `name`、`description`、`match`；③第一步写「第一个要问的问题」：一条 `show` 命令（或一个 `zbx_*` 工具），按输出结果分支，最后一条 `when: default` → `__ai__`；④再加两三步跟进，保持小，剧本是给 agent 的提示不是脚本；⑤`python tools/sop_lint.py playbooks/my-playbook.yaml` 会拒绝未知工具、错误参数名、白名单会拒的命令、运行时分不清的步骤；⑥发一条同触发器名的告警到 webhook（见 INSTALL.md），看记录里的 `sop_usage` 确认 agent 实际用了哪几步。
