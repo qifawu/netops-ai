@@ -4,7 +4,7 @@
 
 **Alert-driven, read-only AI network troubleshooting.** A Zabbix alert comes in, an AI agent investigates the devices with read-only commands, and you get a root-cause conclusion that quotes the evidence it used — on a Feishu card and a web dashboard.
 
-[Install](docs/INSTALL.md) · [Lab](docs/LAB.md) · [Architecture](docs/ARCHITECTURE.md) · [Playbooks](docs/PLAYBOOK-FORMAT.md) · [Contributing](CONTRIBUTING.md)
+[Install](docs/INSTALL.md) · [Deploy: Zabbix & NetBox](docs/DEPLOY.md) · [Lab](docs/LAB.md) · [Architecture](docs/ARCHITECTURE.md) · [Playbooks](docs/PLAYBOOK-FORMAT.md) · [Contributing](CONTRIBUTING.md)
 
 <p align="center"><img src="docs/images/architecture.png" alt="architecture" width="1000"></p>
 
@@ -39,7 +39,7 @@
 - Command audit: every command the AI ran and every one that was refused
 - Local documentation search (the index ships empty; fill it with `tools/kb_ingest.py`)
 - Web dashboard in Chinese and English: overview, incidents, topology, inspection, audit, knowledge base, settings; a demo mode that masks IPs and IDs for screenshots
-- Offline replay and demo data (`tools/demo_replay.py`, `tools/seed_demo.py`)
+- Replay and demo-data scripts (`tools/demo_replay.py`, `tools/seed_demo.py`) for trying the dashboard without a lab
 
 ## Tools
 
@@ -124,7 +124,9 @@ It is a lab-validated, read-only assistant, not a production-tested product.
 
 ## Deploy
 
-Three levels; each works without the next. Full steps: [docs/INSTALL.md](docs/INSTALL.md).
+Three levels; each works without the next. Commands: [docs/INSTALL.md](docs/INSTALL.md). **Step-by-step Zabbix and NetBox setup, with diagrams: [docs/DEPLOY.md](docs/DEPLOY.md).**
+
+<p align="center"><img src="docs/images/deployment.png" alt="deployment overview" width="1000"></p>
 
 ```bash
 git clone https://github.com/qifawu/netops-ai.git && cd netops-ai
@@ -132,19 +134,21 @@ python -m venv .venv && . .venv/bin/activate     # Windows: .venv\Scripts\activa
 pip install -r requirements.txt                   # Python 3.13
 ```
 
-1. **Try it offline** — `python tools/demo_replay.py` (also `python -m pytest tests -q`).
+1. **Check the install** — `python -m pytest tests -q` (no devices, model or credentials needed).
 2. **Dashboard** — `cd web && npm ci && npm run build && cd ..`, then (optional) `python tools/seed_demo.py` to fill it with six synthetic incidents, then `python -m uvicorn netops_ai.api.app:app --host 127.0.0.1 --port 8000` and open http://127.0.0.1:8000.
-3. **Full pipeline** — `cp env.example .env` and fill in: Zabbix (read-only user), devices (**read-only account**), an LLM endpoint, optionally Feishu; list your devices in `topology.yaml`; in Zabbix add a webhook media type that posts to `/webhooks/zabbix`.
+3. **Full pipeline** — `cp env.example .env` and fill in: Zabbix (read-only user), devices (**read-only account**), an LLM endpoint, optionally Feishu; list your devices in `topology.yaml`; in Zabbix add a webhook media type that posts to `/webhooks/zabbix`. What exactly to click in Zabbix and NetBox: [docs/DEPLOY.md](docs/DEPLOY.md).
 
 The API and dashboard have **no login**: keep uvicorn on `127.0.0.1` and put an authenticating reverse proxy in front (nginx example in [INSTALL.md](docs/INSTALL.md#securing-the-api-and-dashboard)).
 
 ## The environment it was built and tested on
 
+<p align="center"><img src="docs/images/lab-topology.png" alt="the reference lab" width="1000"></p>
+
 A virtual network in EVE-NG: 7 Cisco nodes in three layers (2 core and 2 aggregation IOSv, 3 access IOSv-L2), running OSPF and a BGP session, one Zabbix 7.0 server polling over SNMP and receiving traps. Faults were injected by hand on the devices (interface shutdown, OSPF neighbor loss, BGP session shutdown, reload) and the agent was checked against them. Cisco IOS only; not run in production. No device images or configs are included. Details and how to rebuild it: [docs/LAB.md](docs/LAB.md).
 
-## Where it could go next
+## Extension points
 
-Directions where help is welcome; none of them is promised on a date.
+Where the code is built to be extended:
 
 - **More vendors.** Each one is a command-whitelist ruleset, a command catalog and a few playbooks. Cisco IOS is the template.
 - **More playbooks.** Six ship today. A playbook is a small YAML file; [docs/PLAYBOOK-FORMAT.md](docs/PLAYBOOK-FORMAT.md) has a ten-minute guide.

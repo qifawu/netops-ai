@@ -4,7 +4,7 @@
 
 **告警驱动的只读 AI 网络排障。** Zabbix 告警进来，AI 用只读命令去查设备，给出根因结论并引用它依据的原文，推到飞书卡片和网页看板。
 
-[部署](docs/INSTALL.zh-CN.md) · [实验环境](docs/LAB.zh-CN.md) · [架构](docs/ARCHITECTURE.zh-CN.md) · [剧本](docs/PLAYBOOK-FORMAT.zh-CN.md) · [贡献](CONTRIBUTING.zh-CN.md)
+[部署](docs/INSTALL.zh-CN.md) · [接入 Zabbix 和 NetBox](docs/DEPLOY.zh-CN.md) · [实验环境](docs/LAB.zh-CN.md) · [架构](docs/ARCHITECTURE.zh-CN.md) · [剧本](docs/PLAYBOOK-FORMAT.zh-CN.md) · [贡献](CONTRIBUTING.zh-CN.md)
 
 <p align="center"><img src="docs/images/architecture.png" alt="architecture" width="1000"></p>
 
@@ -124,7 +124,9 @@
 
 ## 怎么部署
 
-三个层级，互不依赖。完整步骤见 [docs/INSTALL.zh-CN.md](docs/INSTALL.zh-CN.md)。
+三个层级，互不依赖。命令见 [docs/INSTALL.zh-CN.md](docs/INSTALL.zh-CN.md)；**Zabbix 和 NetBox 逐步配置（带图）见 [docs/DEPLOY.zh-CN.md](docs/DEPLOY.zh-CN.md)。**
+
+<p align="center"><img src="docs/images/deployment.png" alt="部署总览" width="1000"></p>
 
 ```bash
 git clone https://github.com/qifawu/netops-ai.git && cd netops-ai
@@ -132,19 +134,21 @@ python -m venv .venv && . .venv/bin/activate     # Windows：.venv\Scripts\activ
 pip install -r requirements.txt                   # Python 3.13
 ```
 
-1. **离线体验** —— `python tools/demo_replay.py`（也可以 `python -m pytest tests -q`）。
+1. **确认装好了** —— `python -m pytest tests -q`（不需要设备、模型和凭证）。
 2. **看板** —— `cd web && npm ci && npm run build && cd ..`，（可选）`python tools/seed_demo.py` 灌入六条合成告警，再 `python -m uvicorn netops_ai.api.app:app --host 127.0.0.1 --port 8000`，打开 http://127.0.0.1:8000 。
-3. **完整链路** —— `cp env.example .env` 后填写：Zabbix（只读用户）、设备（**只读账号**）、大模型接口，飞书可选；在 `topology.yaml` 里写你的设备；Zabbix 里加一个 webhook 媒介类型，POST 到 `/webhooks/zabbix`。
+3. **完整链路** —— `cp env.example .env` 后填写：Zabbix（只读用户）、设备（**只读账号**）、大模型接口，飞书可选；在 `topology.yaml` 里写你的设备；Zabbix 里加一个 webhook 媒介类型，POST 到 `/webhooks/zabbix`。Zabbix 和 NetBox 里具体怎么点：[docs/DEPLOY.zh-CN.md](docs/DEPLOY.zh-CN.md)。
 
 接口和看板**没有登录**：uvicorn 只监听 `127.0.0.1`，前面放一个带认证的反向代理（nginx 示例见 [INSTALL.zh-CN.md](docs/INSTALL.zh-CN.md#保护接口和看板)）。
 
 ## 开发和测试用的环境
 
+<p align="center"><img src="docs/images/lab-topology.png" alt="参考实验环境" width="1000"></p>
+
 EVE-NG 里的一套虚拟网络：三层 7 台 Cisco 节点（2 台核心 + 2 台汇聚 IOSv，3 台接入 IOSv-L2），跑 OSPF 和一条 BGP 会话；一台 Zabbix 7.0 用 SNMP 轮询并接收 trap。故障是在设备上手工制造的（接口 shutdown、OSPF 邻居丢失、BGP 会话 shutdown、reload），再检查 agent 的结论。仅支持 Cisco IOS，没有在生产网络跑过。仓库不含设备镜像和配置。详情和自己怎么搭一个：[docs/LAB.zh-CN.md](docs/LAB.zh-CN.md)。
 
-## 接下来可能的方向
+## 可拓展方向
 
-欢迎一起做的方向，都不承诺时间。
+代码是照这些方向留的扩展点：
 
 - **更多厂商。** 每个厂商是一套命令白名单规则、一份命令目录和几个剧本，Cisco IOS 就是模板。
 - **更多剧本。** 现在带 6 个。剧本是一个小 YAML，[docs/PLAYBOOK-FORMAT.zh-CN.md](docs/PLAYBOOK-FORMAT.zh-CN.md) 里有十分钟上手指南。
