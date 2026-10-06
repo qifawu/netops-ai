@@ -40,6 +40,31 @@
 - Web dashboard in Chinese and English: overview, incidents, topology, inspection, audit, knowledge base, settings; a demo mode that masks IPs and IDs for screenshots
 - Offline replay and regression tools (`tools/demo_replay.py`, `tools/run_regression.py`)
 
+## Tools
+
+**What the agent can call** — all read-only, registered in one place; the full list is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#the-tools-the-agent-can-use).
+
+| Tool | What it does |
+|---|---|
+| `zbx_*` | Read-only Zabbix queries: hosts, items, history, trends, syslog, problems, top talkers, chart |
+| `device_show` | Run a `show` command on a device, after the command whitelist |
+| `topology_neighbors` | Neighbors of a device or interface from `topology.yaml` |
+| `sop_lookup` | Find the matching playbook — it advises, it never executes |
+| `doc_search` | Keyword (BM25) search over your own documents |
+| `run_inspection`, `get_analysis` | Run an inspection, look up an earlier conclusion |
+
+**Command-line tools** we ship, all runnable offline unless noted:
+
+| Command | What it is for |
+|---|---|
+| `python zbx-cli.py hosts` | Read-only Zabbix CLI that shares the agent's tool definitions; `python zbx-cli.py tools` prints them |
+| `python tools/demo_replay.py` | Replay saved alert records and render the Feishu card, no network needed |
+| `python tools/seed_demo.py` | Fill `records/` with six synthetic incidents so the dashboard has data |
+| `python tools/sop_lint.py` | Lint playbooks: real tools, real parameters, commands the whitelist accepts |
+| `python tools/kb_ingest.py <dir>` | Build the local documentation index (SQLite FTS5) from `.md/.txt/.html/.pdf` |
+| `python tools/llm_doctor.py` | Check your LLM endpoint with a multi-turn tool-call replay (calls the model) |
+| `python -m tools.run_regression <case>` | Replay a recorded case through the model several times (calls the model) |
+
 ## What it looks like
 
 Offline demo (no network, no devices, no model):

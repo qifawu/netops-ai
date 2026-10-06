@@ -40,6 +40,31 @@
 - 中英文网页看板：总览、告警与结论、拓扑、巡检、审计、知识库、设置；演示模式自动遮住 IP 和编号，方便截图
 - 离线回放和回归工具（`tools/demo_replay.py`、`tools/run_regression.py`）
 
+## 工具
+
+**agent 能调用的工具**——全部只读、统一注册；完整列表见 [docs/ARCHITECTURE.zh-CN.md](docs/ARCHITECTURE.zh-CN.md#agent-能用的工具)。
+
+| 工具 | 作用 |
+|---|---|
+| `zbx_*` | Zabbix 只读查询：主机、监控项、历史、趋势、syslog、问题、流量排行、图表 |
+| `device_show` | 过命令白名单后，在设备上执行 `show` 命令 |
+| `topology_neighbors` | 从 `topology.yaml` 查设备或接口的邻居 |
+| `sop_lookup` | 查找匹配的剧本——只给建议，从不执行 |
+| `doc_search` | 对你自己的文档做关键词（BM25）检索 |
+| `run_inspection`、`get_analysis` | 跑一次巡检、查之前的结论 |
+
+**我们带的命令行工具**，除标注的外都能离线运行：
+
+| 命令 | 用途 |
+|---|---|
+| `python zbx-cli.py hosts` | 只读 Zabbix 命令行，和 agent 共用同一份工具定义；`python zbx-cli.py tools` 会打印它们 |
+| `python tools/demo_replay.py` | 回放落盘的告警记录并渲染飞书卡片，不需要网络 |
+| `python tools/seed_demo.py` | 往 `records/` 灌 6 条合成告警，让看板有数据 |
+| `python tools/sop_lint.py` | 检查剧本：工具真实、参数真实、命令能过白名单 |
+| `python tools/kb_ingest.py <目录>` | 用 `.md/.txt/.html/.pdf` 建本地文档索引（SQLite FTS5） |
+| `python tools/llm_doctor.py` | 用多轮工具调用回放检查你的大模型接口（会调模型） |
+| `python -m tools.run_regression <用例>` | 把一个录下来的用例多次送进模型回放（会调模型） |
+
 ## 效果
 
 离线演示（不需要网络、设备、模型）：
