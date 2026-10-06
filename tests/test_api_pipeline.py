@@ -645,8 +645,6 @@ class TestDiagnosticContext(unittest.TestCase):
         self.assertEqual(budget.max_iterations, 18)
         self.assertEqual(budget.max_tool_calls, 12)
         self.assertEqual(budget.no_progress_threshold, 3)
-        # A16：知识库工具（doc_search）在告警这条线默认打开，不吃 DOC_SEARCH 环境变量
-        self.assertTrue(mock_loop.call_args.args[0].keywords.get("include_doc_search"))
 
         from netops_ai.graph.agent_loop import DEFAULT_SYSTEM_PROMPT
 

@@ -890,8 +890,6 @@ def _run_ai_exploration(
         # 把本次要连的设备绑进工具工厂。**不要再用改环境变量的办法**——
         # 那是全局可变状态，只能靠一把大锁把整段循环串起来才不会互相踩，
         # 代价是所有告警的分析完全串行。绑成参数之后锁就不需要了。
-        # include_doc_search=True：A16 把知识库工具在告警这条线默认打开，不吃
-        # DOC_SEARCH 环境变量（那个继续只管对话那条线，没有跟着变）。
         partial(build_chat_tools, device_host=device_host, alert_clock=alert_clock, include_doc_search=True),
         question=question,
         session_id=f"pipeline-{int(time.time() * 1000)}-{uuid.uuid4().hex[:4]}",

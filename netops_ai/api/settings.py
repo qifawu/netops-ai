@@ -112,8 +112,6 @@ FIELDS: tuple[SettingField, ...] = (
     SettingField("DEVICE_VENDOR", "设备厂商", "connection", "device", "决定命令语法/白名单走哪套模板，例如 cisco"),
     SettingField("DEVICE_TRANSPORT", "设备连接方式", "connection", "device", "默认走 SSH；只有 console/应急路径才显式改成 telnet（明文协议）"),
     SettingField("DEVICE_TELNET_PORT", "设备 Telnet 端口", "connection", "device", "显式设置 DEVICE_TRANSPORT=telnet 才会用到，默认 23", numeric=True),
-    # ---- 连接配置 / 知识库 ----
-    SettingField("DOC_SEARCH_DB", "知识库数据库路径", "connection", "kb", "SQLite FTS5 检索库文件路径，不配用默认 records/docs_kb.db"),
 
     # ---- 运行参数 / 取证预算与循环控制 ----
     SettingField("ANALYSIS_TOKEN_BUDGET", "全局 token 预算", "runtime", "budget", "单次 agent 循环的 token 上限（prompt+completion 累计），超了带着已有证据出残缺结论；0 或留空 = 不限", numeric=True),

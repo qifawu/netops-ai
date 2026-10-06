@@ -88,9 +88,6 @@ def zabbix_webhook(payload: ZabbixWebhookPayload, background_tasks: BackgroundTa
     return {"status": "accepted", "eventid": payload.eventid}
 
 
-from netops_ai.api.kb import router as _kb_router  # noqa: E402
-
-app.include_router(_kb_router)  # 知识库页面：只读概览 + 检索试验台
 
 from netops_ai.api.settings import router as _settings_router  # noqa: E402
 

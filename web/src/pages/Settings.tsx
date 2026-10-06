@@ -52,7 +52,6 @@ const CONNECTION_CARDS: { key: string; titleKey: DictKey; icon: string; testTarg
   { key: "llm", titleKey: "settings.card.llm", icon: PATH.spark, testTarget: "llm" },
   { key: "feishu", titleKey: "settings.card.feishu", icon: PATH.send },
   { key: "device", titleKey: "settings.card.device", icon: PATH.terminal },
-  { key: "kb", titleKey: "settings.card.kb", icon: PATH.list },
 ];
 
 const RUNTIME_GROUPS: { key: string; titleKey: DictKey; noteKey?: DictKey }[] = [
