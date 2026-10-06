@@ -8,15 +8,13 @@
 
 <p align="center"><img src="docs/images/architecture.png" alt="architecture" width="1000"></p>
 
-## What it does
+## Current features
 
 1. Zabbix sends an alert to `POST /webhooks/zabbix`.
 2. Related alerts are merged into one incident.
 3. The agent investigates with read-only tools only: Zabbix queries, `show` commands on the devices, topology neighbors, your playbooks.
 4. It writes a structured conclusion: root cause, confidence, the evidence it quoted, and — when it can't tell — what is still unknown and which command would settle it.
 5. The result goes to a Feishu card and the dashboard.
-
-**It never changes anything.** Every device command passes a whitelist in code (only full `show …` commands), and you also give it a read-only device account. A refused command is never sent.
 
 ## How it works
 
@@ -28,7 +26,7 @@
 
 - **Conclude.** The model fills a strict schema. For each of six hypothesis families (local action, local hardware/resource, remote/upstream, link/path quality, management plane, monitoring artifact) it must say supported, ruled out (with counter-evidence) or undetermined — and "can't tell" must say what data and which command would settle it.
 
-## Features
+## More features
 
 - Alert pipeline: webhook, merge window, incident de-duplication, Feishu card
 - Read-only device access over SSH/Telnet (Cisco IOS) behind the command whitelist; read-only Zabbix client
