@@ -605,6 +605,7 @@ FORENSICS_SYSTEM_PROMPT = """你是网络运维真实告警的根因分析取证
 - 引文必须逐字来自原文——本会话的工具返回，或提示里给出的告警原文/第一信源——并注明出处；不改写、不拼接、不补全。
 - 分清每条证据的时间：故障窗口内的日志/历史、取证时刻的设备状态（当前快照）、与时间无关的事实。告警已经恢复时，当前快照不代表故障时刻。
 - 引用 trap、日志、事件当证据前，先核对它的时间戳是否落在这条告警的故障窗口内（告警时间前后十来分钟）。更早的记录——几个小时前的一次启动、上一次故障留在日志里的内容——只能当背景，不能当本次的原因；设备已经连续运行数小时（uptime 很长）时，不要下「刚重启」的结论。
+- 提示里如果有「同一个事件窗口里其它设备上的告警」，先判断它们是不是同一件事的两端（同一条链路、同一个邻接/会话）：是就按一件事写，结论同时点名两端设备，并去对端取证（对端的配置/日志），不要只看本端就下结论。
 - 告警本身是恢复类的（邻居回到 FULL / Established、链路回到 up）且设备当前状态正常时，结论写成「已恢复」，并说明恢复前那次故障（只在故障窗口内有证据时才写）；不要拿更早的日志编出新的根因，置信度不高于 medium。
 - 本系统取证用的只读账号（如 ai-readonly）的登录/登出记录是取证动作本身留下的，不是故障证据。
 - 回答“我查过什么”只能依据本会话真实工具调用；看不到记录就说看不到。
@@ -1085,6 +1086,8 @@ class _PendingAlert:
     zbx_err: str
     started_at: str
     device_host: str = ""
+    #: 这条告警对应拓扑里的哪台设备（`_alert_device_name` 填；查不到是空串，就不参与跨设备合并）
+    device_name: str = ""
 
 
 @dataclass
@@ -1096,6 +1099,8 @@ class _IncidentWindow:
     opened_at: float = 0.0
     #: 批内告警类型算出来的最短等待，来了新类型可能变大，只增不减
     min_wait: int = 0
+    #: 窗口里各告警对应的拓扑设备名（跨设备合并用）
+    devices: set = field(default_factory=set)
 
 
 _INCIDENT_WINDOWS: dict[str, _IncidentWindow] = {}
@@ -1121,6 +1126,90 @@ _INCIDENT_WINDOWS_LOCK = threading.Lock()
 #:
 _ACTIVE_RUN_HOSTS: set[str] = set()
 _FOLLOWUP_QUEUE: dict[str, _IncidentWindow] = {}
+#: 正在跑的那次分析涉及哪些拓扑设备（key 同 `_ACTIVE_RUN_HOSTS`），邻居设备的新告警据此排进同一条队列。
+_ACTIVE_RUN_DEVICES: dict[str, set] = {}
+
+_HOST_LINE_RE = re.compile(r"## 主机：(.+?)（管理地址 ([^）]*)）")
+
+
+def _alert_device_name(alert: "_PendingAlert") -> str:
+    """这条告警对应拓扑里的哪台设备：先用告警文本里的 Zabbix 主机名（可能是别名），再用管理地址。
+    拓扑读不到或对不上就返回空串——此时这条告警只按主机攒批，不参与跨设备合并。"""
+    try:
+        from netops_ai import topology as _topo
+
+        devices = _topo.load_topology()
+        m = _HOST_LINE_RE.search(alert.zabbix_text or "")
+        names = [m.group(1).strip()] if m else []
+        names.append(str((alert.payload or {}).get("host") or ""))
+        for label in names:
+            if label:
+                device = _topo.resolve_device(devices, label)
+                if device is not None:
+                    return device.name
+        ips = [alert.device_host, m.group(2).strip() if m else ""]
+        for device in devices.values():
+            if device.host and device.host in ips:
+                return device.name
+    except Exception:  # noqa: BLE001 — 合并只是优化，读拓扑出错不能影响收告警
+        return ""
+    return ""
+
+
+def _related_devices(device: str) -> set:
+    """这台设备自己 + 拓扑里和它有连线的邻居（连线两端的告警多半是同一件事）。"""
+    if not device:
+        return set()
+    try:
+        from netops_ai import topology as _topo
+
+        devices = _topo.load_topology()
+        related = {device}
+        for dev in devices.values():
+            peers = {link.peer for link in dev.links}
+            if dev.name == device:
+                related |= peers
+            elif device in peers:
+                related.add(dev.name)
+        return related
+    except Exception:  # noqa: BLE001
+        return {device}
+
+
+def _merge_related_windows(this_key: str, related: set) -> str:
+    """把设备集合和 `related` 有交集的已开窗口并成一个（保留最早开的那个），返回要加入的窗口 key；没有就返回空串。
+    **必须在持有 `_INCIDENT_WINDOWS_LOCK` 的情况下调用。**"""
+    matches = [k for k, w in _INCIDENT_WINDOWS.items() if k == this_key or (w.devices & related)]
+    if not matches:
+        return ""
+    target = min(matches, key=lambda k: _INCIDENT_WINDOWS[k].opened_at)
+    target_window = _INCIDENT_WINDOWS[target]
+    for key in matches:
+        if key == target:
+            continue
+        other = _INCIDENT_WINDOWS.pop(key)
+        if other.timer is not None:
+            other.timer.cancel()
+        target_window.pending.extend([other.first_alert, *other.pending])
+        target_window.devices |= other.devices
+        target_window.min_wait = max(target_window.min_wait, other.min_wait)
+    return target
+
+
+def _other_host_alert_text(alerts: list) -> str:
+    """同一个窗口里别的设备上的告警原文，接在领头告警后面给 agent 看（同设备的靠 zbx_problems 自己查）。"""
+    leading = alerts[0]
+    others = [a for a in alerts[1:] if a.device_name and a.device_name != leading.device_name]
+    if not others:
+        return ""
+    parts = [
+        "## 同一个事件窗口里其它设备上的告警\n"
+        "它们在拓扑上和上面这台直连，很可能是同一件事的另一端。是不是同一件事、谁是根因要你自己判断；"
+        "是的话在 alert_roles / grouping 里归到同一组，结论里同时点名两端设备，不要各说各话。"
+    ]
+    for a in others[:6]:
+        parts.append(f"\n### {a.device_name}（eventid {a.eventid}）\n{(a.zabbix_text or '')[:1800]}")
+    return "".join(parts)
 
 
 def _write_pending_stub(alert: _PendingAlert) -> None:
@@ -1209,7 +1298,19 @@ def process_alert(payload: dict) -> dict:
     _, window_max = _incident_window_seconds(env)
     quiet = _incident_window_quiet_seconds(env)
     host_key = hostid or f"event:{eventid}"
+    alert.device_name = _alert_device_name(alert)
+    related = _related_devices(alert.device_name)
     with _INCIDENT_WINDOWS_LOCK:
+        if related:
+            # 同一条链路/邻接的另一端：并进已经开着的窗口（多个相关窗口会被并成一个）；
+            # 没有开着的窗口但邻居的分析正在跑，就排进那条队列（带上它的结论当提示）。
+            joined = _merge_related_windows(host_key, related)
+            if joined:
+                host_key = joined
+            else:
+                active = next((k for k, devs in _ACTIVE_RUN_DEVICES.items() if k in _ACTIVE_RUN_HOSTS and devs & related), "")
+                if active:
+                    host_key = active
         # 这台主机正有一次 agent 循环在跑——别另起一次盲跑，排队等它跑完（A16 follow-up）。
         if host_key in _ACTIVE_RUN_HOSTS:
             queued = _FOLLOWUP_QUEUE.get(host_key)
@@ -1218,6 +1319,8 @@ def process_alert(payload: dict) -> dict:
                 _FOLLOWUP_QUEUE[host_key] = queued
             else:
                 queued.pending.append(alert)
+            if alert.device_name:
+                queued.devices.add(alert.device_name)
             return {"eventid": eventid, "status": "queued_followup", "host_key": host_key}
 
         window = _INCIDENT_WINDOWS.get(host_key)
@@ -1226,8 +1329,12 @@ def process_alert(payload: dict) -> dict:
                 first_alert=alert, opened_at=time.monotonic(), min_wait=_min_wait_for(alert)
             )
             _INCIDENT_WINDOWS[host_key] = window
+            if alert.device_name:
+                window.devices.add(alert.device_name)
         else:
             window.pending.append(alert)
+            if alert.device_name:
+                window.devices.add(alert.device_name)
             # 新来的告警可能把最短等待拉长（比如先来接口 down，后来 BGP 也报了）
             window.min_wait = max(window.min_wait, _min_wait_for(alert))
         _rearm_window_timer(host_key, window, quiet=quiet, window_max=window_max)
@@ -1263,6 +1370,7 @@ def _flush_incident_window(*, host_key: str) -> dict | None:
     hint = ""
     with _INCIDENT_WINDOWS_LOCK:
         _ACTIVE_RUN_HOSTS.add(host_key)
+        _ACTIVE_RUN_DEVICES[host_key] = set(window.devices)
     try:
         while window is not None:
             alerts = [window.first_alert, *window.pending]
@@ -1277,9 +1385,13 @@ def _flush_incident_window(*, host_key: str) -> dict | None:
                 window = _FOLLOWUP_QUEUE.pop(host_key, None)
                 if window is None:
                     _ACTIVE_RUN_HOSTS.discard(host_key)
+                    _ACTIVE_RUN_DEVICES.pop(host_key, None)
+                else:
+                    _ACTIVE_RUN_DEVICES[host_key] = set(window.devices)
     finally:
         with _INCIDENT_WINDOWS_LOCK:
             _ACTIVE_RUN_HOSTS.discard(host_key)
+            _ACTIVE_RUN_DEVICES.pop(host_key, None)
     return first_result
 
 
@@ -1300,6 +1412,9 @@ def _process_incident_batch_inner(hostid: str, alerts: list, *, followup_hint: s
     # A16 follow-up：这批是排在上一次同主机分析后面接进来的，把上一次的结论
     # 当提示词的一部分喂进去——不是另起一次互不相干的盲跑（见 _flush_incident_window）。
     leading_zabbix_text = f"{followup_hint}\n\n{leading.zabbix_text}" if followup_hint else leading.zabbix_text
+    others_text = _other_host_alert_text(alerts)
+    if others_text:
+        leading_zabbix_text = f"{leading_zabbix_text}\n\n{others_text}"
 
     t0 = time.time()
     diagnostic = fetch_diagnostic_context(
@@ -1369,7 +1484,8 @@ def _process_incident_batch_inner(hostid: str, alerts: list, *, followup_hint: s
         group_alerts = [alerts_by_id[e] for e in event_ids]
         triggerids = sorted({a.triggerid for a in group_alerts if a.triggerid})
         interfaces = sorted({i for a in group_alerts for i in (a.interfaces or [])})
-        fingerprint = compute_fingerprint(hostid, triggerids, interfaces)
+        group_hostids = sorted({a.hostid for a in group_alerts if a.hostid})
+        fingerprint = compute_fingerprint("+".join(group_hostids) if len(group_hostids) > 1 else hostid, triggerids, interfaces)
         for eid in event_ids:
             # 原料跟着 eventid 存，落记录时一起写进去，指纹才审计得动。
             fingerprint_inputs[eid] = {
@@ -1407,11 +1523,12 @@ def _process_incident_batch_inner(hostid: str, alerts: list, *, followup_hint: s
         event_ids = [str(e) for e in (group.get("events") or []) if str(e) in alerts_by_id]
         if not event_ids:
             continue
+        group_hosts = list(dict.fromkeys(alerts_by_id[e].device_name or alerts_by_id[e].device_host for e in event_ids))
         alert_group = AlertGroup(
             eventids=event_ids,
             analysis=analysis_parsed or {},
             alert_names={eid: alerts_by_id[eid].name for eid in event_ids},
-            host=alerts_by_id[event_ids[0]].device_host,
+            host=" / ".join(g for g in group_hosts if g) if len(group_hosts) > 1 else alerts_by_id[event_ids[0]].device_host,
             violations=list(business_rule_violations),
             evidence_verification=evidence_verification,
         )

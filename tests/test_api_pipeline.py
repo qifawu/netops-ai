@@ -1238,3 +1238,83 @@ class TestSelfContaminationWarning(unittest.TestCase):
         text, *_ = pipeline.fetch_zabbix_context("1")
 
         self.assertNotIn("本系统自己取证", text)
+
+
+class TestCrossDeviceWindowMerge(unittest.TestCase):
+    """同一条链路/邻接两端的告警并进同一个事件窗口（按拓扑直连判断）；不相邻的设备各开各的。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch.object(pipeline, "RECORDS_DIR", Path(self.tmp.name))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self._reset()
+        self.addCleanup(self._reset)
+
+    @staticmethod
+    def _reset():
+        with pipeline._INCIDENT_WINDOWS_LOCK:
+            for window in pipeline._INCIDENT_WINDOWS.values():
+                if window.timer is not None:
+                    window.timer.cancel()
+            pipeline._INCIDENT_WINDOWS.clear()
+            pipeline._ACTIVE_RUN_HOSTS.clear()
+            pipeline._ACTIVE_RUN_DEVICES.clear()
+            pipeline._FOLLOWUP_QUEUE.clear()
+
+    def _alert(self, eventid, hostid, zbx_host, clock=1700000000):
+        text = f"## 主机：{zbx_host}（管理地址 192.0.2.1）\n\n## 告警原文\n{{\"eventid\": \"{eventid}\"}}"
+        with mock.patch("netops_ai.api.pipeline.fetch_zabbix_context",
+                        return_value=(text, hostid, clock, "", {"triggerid": eventid, "tags": [], "interfaces": []})):
+            return pipeline.process_alert({"eventid": eventid, "name": "x"})
+
+    def test_直连邻居的告警并进同一个窗口(self):
+        self._alert("5001", "10", "V1-vios")
+        result = self._alert("5002", "11", "V2-vios")  # V1 和 V2 直连
+        self.assertEqual(result["status"], "buffered_for_window")
+        self.assertEqual(list(pipeline._INCIDENT_WINDOWS), ["10"])
+        window = pipeline._INCIDENT_WINDOWS["10"]
+        self.assertEqual([a.eventid for a in window.pending], ["5002"])
+        self.assertEqual(window.devices, {"V1", "V2"})
+
+    def test_不相邻的设备各开各的窗口(self):
+        self._alert("5003", "20", "A2-viosl2")
+        self._alert("5004", "10", "V1-vios")  # A2 的邻居是 D1，不是 V1
+        self.assertEqual(sorted(pipeline._INCIDENT_WINDOWS), ["10", "20"])
+
+    def test_后到的告警把两个相关窗口并成一个(self):
+        self._alert("5005", "30", "D1-vios")   # D1、A3 互不直连
+        self._alert("5006", "31", "A3-viosl2")
+        self.assertEqual(sorted(pipeline._INCIDENT_WINDOWS), ["30", "31"])
+        self._alert("5007", "32", "D2-vios")   # D2 同时是 D1 和 A3 的邻居
+        self.assertEqual(list(pipeline._INCIDENT_WINDOWS), ["30"])
+        window = pipeline._INCIDENT_WINDOWS["30"]
+        self.assertEqual({a.eventid for a in [window.first_alert, *window.pending]}, {"5005", "5006", "5007"})
+        self.assertEqual(window.devices, {"D1", "A3", "D2"})
+
+    def test_邻居的分析正在跑时排进它的队列(self):
+        with pipeline._INCIDENT_WINDOWS_LOCK:
+            pipeline._ACTIVE_RUN_HOSTS.add("10")
+            pipeline._ACTIVE_RUN_DEVICES["10"] = {"V1"}
+        result = self._alert("5008", "11", "V2-vios")
+        self.assertEqual(result["status"], "queued_followup")
+        self.assertEqual(result["host_key"], "10")
+        self.assertEqual(pipeline._FOLLOWUP_QUEUE["10"].devices, {"V2"})
+
+    def test_拓扑里查不到的主机照旧按主机攒批(self):
+        self._alert("5009", "40", "unknown-host")
+        self._alert("5010", "41", "V1-vios")
+        self.assertEqual(sorted(pipeline._INCIDENT_WINDOWS), ["40", "41"])
+
+    def test_其它设备的告警原文会接到提示里(self):
+        a1 = pipeline._PendingAlert(eventid="1", payload={}, zabbix_text="T1", hostid="10", clock=0, triggerid="", tags=[],
+                                    interfaces=[], name="n", zbx_err="", started_at="", device_name="V1")
+        a2 = pipeline._PendingAlert(eventid="2", payload={}, zabbix_text="T2-peer", hostid="11", clock=0, triggerid="", tags=[],
+                                    interfaces=[], name="n", zbx_err="", started_at="", device_name="V2")
+        a3 = pipeline._PendingAlert(eventid="3", payload={}, zabbix_text="T3-same", hostid="10", clock=0, triggerid="", tags=[],
+                                    interfaces=[], name="n", zbx_err="", started_at="", device_name="V1")
+        text = pipeline._other_host_alert_text([a1, a2, a3])
+        self.assertIn("T2-peer", text)
+        self.assertNotIn("T3-same", text)
+        self.assertEqual(pipeline._other_host_alert_text([a1, a3]), "")
