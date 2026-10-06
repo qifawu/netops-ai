@@ -9,7 +9,6 @@ _tmp = tempfile.mkdtemp(prefix="netops-test-ledger-")
 os.environ["TOKEN_LEDGER_PATH"] = os.path.join(_tmp, "ledger.jsonl")
 # 成本配置同理：测试不读也不写仓库根的真实 cost.yaml（对话闸门会读它）。
 os.environ["NETOPS_COST_CONFIG"] = os.path.join(_tmp, "cost.yaml")
-# 会员版认证库同理：测试不碰真实的 records/auth.db，也不继承外面的 NETOPS_AUTH 开关。
 os.environ["AUTH_DB"] = os.path.join(_tmp, "auth.db")
 os.environ.pop("NETOPS_AUTH", None)
 

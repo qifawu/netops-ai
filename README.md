@@ -33,6 +33,7 @@
 - Alert pipeline: webhook, merge window, incident de-duplication, Feishu card
 - Read-only device access over SSH/Telnet (Cisco IOS) behind the command whitelist; read-only Zabbix client
 - Structured conclusions with a six-family hypothesis checklist and an honest "can't tell"
+- Topology from NetBox (optional, read-only, with a webhook for instant refresh) or from a YAML file
 - Playbooks (SOP) as advice, with a linter; six examples: interface down, OSPF adjacency, BGP session, device restart, high CPU, interface errors
 - Scheduled inspection: trend detectors on Zabbix history plus live read-only status checks, history, diff against the last run, Markdown/HTML export
 - Command audit: every command the AI ran and every one that was refused
@@ -48,7 +49,8 @@
 |---|---|
 | `zbx_*` | Read-only Zabbix queries: hosts, items, history, trends, syslog, problems, top talkers, chart |
 | `device_show` | Run a `show` command on a device, after the command whitelist |
-| `topology_neighbors` | Neighbors of a device or interface from `topology.yaml` |
+| `topology_neighbors` | Neighbors of a device or interface — from NetBox if configured, else `topology.yaml` |
+| `nb_devices`, `nb_topology` | NetBox inventory (read-only, when NetBox is configured) |
 | `sop_lookup` | Find the matching playbook — it advises, it never executes |
 | `doc_search` | Keyword (BM25) search over your own documents |
 | `run_inspection`, `get_analysis` | Run an inspection, look up an earlier conclusion |
@@ -58,6 +60,7 @@
 | Command | What it is for |
 |---|---|
 | `python zbx-cli.py hosts` | Read-only Zabbix CLI that shares the agent's tool definitions; `python zbx-cli.py tools` prints them |
+| `python -m netops_ai.netbox_cli devices` | Read-only NetBox inventory CLI (`devices`, `neighbors <dev>`, `topology`); needs `NETBOX_URL` and `NETBOX_TOKEN` |
 | `python tools/demo_replay.py` | Replay saved alert records and render the Feishu card, no network needed |
 | `python tools/seed_demo.py` | Fill `records/` with six synthetic incidents so the dashboard has data |
 | `python tools/sop_lint.py` | Lint playbooks: real tools, real parameters, commands the whitelist accepts |

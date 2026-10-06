@@ -35,7 +35,8 @@ Zabbix 触发器 ──► POST /webhooks/zabbix ──► 立刻返回 200（Za
 |---|---|
 | `zbx_*` | Zabbix 只读查询——主机、监控项、历史、趋势、syslog、问题、流量排行、图表（由 `zabbix/cli.py` 生成，命令行和工具共用同一张规格表） |
 | `device_show`、`device_show_many` | 过白名单后在设备上执行 `show` 命令 |
-| `topology_neighbors` | 从 `topology.yaml` 查某台设备/接口的邻居 |
+| `topology_neighbors` | 查某台设备/接口的邻居——配了 `NETBOX_URL` 就读 NetBox，否则读 `topology.yaml` |
+| `nb_devices`、`nb_topology` | NetBox 台账（只读；只有配了 NetBox 才出现） |
 | `sop_lookup` | 查找匹配的剧本（只给建议，从不执行） |
 | `doc_search` | 对你本地文档索引做 BM25 检索 |
 | `run_inspection`、`list_analyses`、`get_analysis` | 跑/读巡检，查之前的结论 |

@@ -89,7 +89,7 @@ function Shell() {
     return () => window.removeEventListener("netops:nav", on);
   }, []);
   const member = useMember();
-  // 会员版入口注入的页面（对话、SOP 剧本、成本、用户管理）：按 `group` 放进对应分组，`after` 指定排在哪一项后面。
+  // 扩展入口注入的页面：按 `group` 放进对应分组，`after` 指定排在哪一项后面。
   // 公开版的入口是直通桩，返回空数组，侧边栏就只有上面 NAV 里写死的那些。
   const nav = useMemo(() => {
     const groups = NAV.map((g) => ({ ...g, items: [...g.items] }));
@@ -191,7 +191,7 @@ export default function App() {
   const setLang = (l: Lang) => { setLangState(l); storeLang(l); };
   return (
     <LangContext.Provider value={{ lang, setLang }}>
-      {/* 会员版：登录门禁。没启用多用户 / 公开版时直通，Shell 照常渲染。数据请求都在 Shell 里，登录之后才发。 */}
+      {/* 登录门禁。没启用时直通，Shell 照常渲染。数据请求都在 Shell 里，登录之后才发。 */}
       <AuthGate><Shell /></AuthGate>
     </LangContext.Provider>
   );

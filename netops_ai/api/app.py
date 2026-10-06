@@ -175,6 +175,34 @@ def api_topology(refresh: int = 0) -> JSONResponse:
     return JSONResponse(dashboard.build_topology_view(dashboard.build_incidents(alerts)))
 
 
+def netbox_signature_ok(secret: str, body: bytes, header: str) -> bool:
+    """NetBox webhook 的签名：`X-Hub-Signature: sha512=<hex(HMAC-SHA512(secret, body))>`。没配 secret 就不校验（实验环境）。"""
+    import hmac
+
+    if not secret:
+        return True
+    digest = hmac.new(secret.encode("utf-8"), body, "sha512").hexdigest()
+    got = (header or "").split("=", 1)[-1].strip()
+    return hmac.compare_digest(digest, got)
+
+
+@app.post("/webhooks/netbox")
+async def netbox_webhook(request: Request) -> JSONResponse:
+    """NetBox 里设备/接口/线缆有增删改时（Event Rule → Webhook）通知我们：作废拓扑缓存，下次读取重新去 NetBox 取。"""
+    from netops_ai import topology as _topology
+
+    body = await request.body()
+    if not netbox_signature_ok(_env().get("NETBOX_WEBHOOK_SECRET", ""), body, request.headers.get("X-Hub-Signature", "")):
+        return JSONResponse({"status": "bad_signature"}, status_code=403)
+    _topology.invalidate_cache()
+    model = ""
+    try:
+        model = str(json.loads(body or b"{}").get("model") or "")
+    except ValueError:
+        pass
+    return JSONResponse({"status": "cache_invalidated", "model": model})
+
+
 @app.get("/api/inspection")
 def api_get_inspection() -> JSONResponse:
     latest = dashboard.load_latest_inspection()

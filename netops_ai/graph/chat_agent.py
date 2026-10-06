@@ -1,7 +1,7 @@
 """智能体工具注册（Zabbix / 设备 / 拓扑 / SOP / 巡检 / 历史 / 文档检索）和工具返回的统一包装。
 
 告警分析链路、剧本 lint、对话都用这里的 `build_chat_tools`——这部分是公开的。
-多轮对话的服务层（历史、会话焦点、对话预算和提示词）不在这里，是会员版模块。
+多轮对话的服务层（历史、会话焦点、对话预算和提示词）不在这里。
 """
 
 
@@ -82,7 +82,7 @@ from netops_ai.topology import known_device_labels, load_topology, resolve_devic
 
 
 try:
-    from netops_ai import netbox_cli as nb_cli  # 会员版：NetBox 台账三工具
+    from netops_ai import netbox_cli as nb_cli  # NetBox 台账工具
 except ImportError:  # 开源版：只有 topology_neighbors（本地 yaml）
     from netops_ai import topology_cli as nb_cli
 

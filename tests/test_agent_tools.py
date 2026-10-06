@@ -1,5 +1,5 @@
 """智能体工具注册（`graph/chat_agent.py`）：Zabbix / 设备 / 拓扑 / SOP / 文档检索工具的生成、白名单闸门、trace 记录。
-对话服务层的测试在 `test_chat_agent.py`（会员版）。"""
+"""
 from __future__ import annotations
 
 import json

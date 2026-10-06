@@ -93,6 +93,7 @@ You can also edit most values on the dashboard's **Settings** page, which reads 
 | LLM | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` (`LLM_PROVIDER` optional) | `python tools/llm_doctor.py` checks the transport with a multi-turn tool replay |
 | Feishu | `FEISHU_WEBHOOK_URL`, or `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_CHAT_ID` | Optional; without it conclusions are still stored and shown on the dashboard |
 | Budgets | `ANALYSIS_TOKEN_BUDGET` (default 60000) | Soft cap per investigation |
+| NetBox (optional) | `NETBOX_URL`, `NETBOX_TOKEN`, `NETBOX_WEBHOOK_SECRET`, `TOPOLOGY_CACHE_TTL` | Read topology from NetBox instead of the file — see [3.5](#35-topology-from-netbox-optional) |
 | Topology | `topology.yaml` | Devices, management IPs, aliases (e.g. the Zabbix host name `D1-vios` for device `D1`) and links. **Aliases must be listed explicitly — there is no fuzzy matching** |
 
 ### 3.2 Devices: the read-only account
@@ -136,6 +137,31 @@ Trigger a test: `curl -X POST http://127.0.0.1:8000/webhooks/zabbix -H 'content-
 - **A lab to try it on**: [LAB.md](LAB.md) describes the reference lab (7 Cisco nodes, Zabbix, traps, the faults we injected) and how to rebuild something similar.
 - **Documentation search**: the index ships empty. Try it with the three sample notes: `python tools/kb_ingest.py examples/kb`, then open the Knowledge page. For your own use, ingest documents you are licensed to use (`python tools/kb_ingest.py --help`); the agent's `doc_search` tool then returns passages labelled as vendor documentation (never as device evidence).
 - **Scheduled inspection**: runs every `SCHEDULE_INTERVAL_MINUTES` (default 60) while the API process is up.
+
+### 3.5 Topology from NetBox (optional)
+
+By default the topology comes from `topology.yaml`. If you keep your inventory in NetBox, set `NETBOX_URL` and `NETBOX_TOKEN` in `.env` and the devices and links come from NetBox instead; the file stays as the offline fallback. The integration is **read-only** (GET requests to `/api/dcim/devices/` and `/api/dcim/interfaces/` only).
+
+What the agent and the dashboard read from NetBox:
+
+| NetBox field | Used for |
+|---|---|
+| device name, `status` | Only devices with status *active* are drawn; offline / decommissioning / inventory / failed ones are left out and are not treated as neighbors |
+| device role (slug `core`, `aggregation`, `access`) | The layers of the topology page; "is this neighbor above me?" in the agent's answers |
+| primary IPv4 | The management address the agent connects to |
+| interfaces and their cables (link peers) | The links between devices |
+| custom field `zabbix_host` | The Zabbix host name for the device (the alias; there is no fuzzy matching) |
+| device type, platform, site, rack, serial, custom field `software_version` | Shown in the device details |
+
+- **Token.** NetBox 4.7+ uses v2 tokens: paste the full `nbt_<key>.<plaintext>` string; older v1 tokens work too. A read-only token is enough.
+- **Fallback.** If NetBox is unreachable the last good result is reused for a while and the dashboard says so; with no previous result it falls back to `topology.yaml` and records why. Results are cached for `TOPOLOGY_CACHE_TTL` seconds (default 600).
+- **Instant refresh.** In NetBox create an event rule that calls a webhook to `POST /webhooks/netbox` on device, interface and cable changes, and set the same secret as `NETBOX_WEBHOOK_SECRET`; the request is verified with an HMAC-SHA512 signature (`X-Hub-Signature`). The page also has a "re-read" button. Treat this route like the Zabbix webhook when you put a reverse proxy in front: allow it by source address (see [Securing](#securing-the-api-and-dashboard)).
+- **Command line.** `python -m netops_ai.netbox_cli devices`, `neighbors D1`, `topology` — the same data the agent's `nb_devices`, `nb_topology` and `topology_neighbors` tools see.
+- **Check.** The topology page header says "Topology source: NetBox" or "local yaml"; Settings has a connection test for NetBox.
+
+The topology page with NetBox as the source (IPs masked by the demo mode):
+
+<p align="center"><img src="images/ui-topology-netbox.png" width="820"></p>
 
 ## Troubleshooting
 

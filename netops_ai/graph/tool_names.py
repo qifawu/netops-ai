@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 try:
-    from netops_ai import netbox_cli as nb_cli  # 会员版：NetBox 台账三工具
+    from netops_ai import netbox_cli as nb_cli  # NetBox 台账工具
 except ImportError:  # 开源版：只有 topology_neighbors（本地 yaml）
     from netops_ai import topology_cli as nb_cli
 from netops_ai.zabbix import cli as zbx_cli

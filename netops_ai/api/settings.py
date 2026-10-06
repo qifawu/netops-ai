@@ -85,6 +85,10 @@ FIELDS: tuple[SettingField, ...] = (
     SettingField("ZABBIX_URL", "Zabbix 地址", "connection", "zabbix", "Zabbix Web/API 根地址，例如 http://<host>:8880"),
     SettingField("ZABBIX_USER", "Zabbix 用户名", "connection", "zabbix", "只读账号用户名"),
     SettingField("ZABBIX_PASSWORD", "Zabbix 密码", "connection", "zabbix", "只读账号密码"),
+    # ---- 连接配置 / NetBox（netops_ai/netbox.py, api/app.py netbox_webhook） ----
+    SettingField("NETBOX_URL", "NetBox 地址", "connection", "netbox", "配了就从 NetBox 读拓扑，没配就读版本化的 topology.yaml"),
+    SettingField("NETBOX_TOKEN", "NetBox Token", "connection", "netbox", "NetBox 4.7 起是 v2 格式 nbt_<key>.<plaintext>；代码按前缀自动选 Bearer(v2)/Token(v1)"),
+    SettingField("NETBOX_WEBHOOK_SECRET", "NetBox Webhook 密钥", "connection", "netbox", "校验 NetBox 变更 webhook 的 HMAC 签名；不配就不校验（仅适合实验环境）"),
     # ---- 连接配置 / LLM（netops_ai/llm/factory.py, llm/client.py） ----
     SettingField("LLM_PROVIDER", "LLM Provider", "connection", "llm", "未找到现成说明，字面意思：显式指定厂商/协议路由，留空按 LLM_BASE_URL 自动识别（合法值见 llm/factory.py EXPLICIT_PROVIDER_ALIASES，如 openai / anthropic / deepseek / gemini:native）"),
     SettingField("LLM_BASE_URL", "LLM Base URL", "connection", "llm", "OpenAI 兼容 /chat/completions 的根地址"),
@@ -121,6 +125,13 @@ FIELDS: tuple[SettingField, ...] = (
     SettingField("AGENT_LOOP_PROGRESS", "工具调用进度提示", "runtime", "loop", "每次工具返回末尾追加一行 [进度]…；设为 off 关闭", switch=True),
     SettingField("AGENT_LOOP_COMPACT", "历史工具结果压缩", "runtime", "loop", "送给模型前把较早的工具结果换成占位，省 token；默认关，设为 on 才开", switch=True),
     SettingField("AGENT_LOOP_COMPACT_KEEP", "压缩后保留的工具结果条数", "runtime", "loop", "开启压缩时，最近几个工具结果保留原文不压缩，默认 3", numeric=True),
+    # ---- 运行参数 / 拓扑缓存 ----
+    SettingField(
+        "TOPOLOGY_CACHE_TTL", "拓扑缓存 TTL（秒）", "runtime", "topology",
+        "NetBox 拓扑的进程内缓存时长，默认 600 秒；NetBox 有变更会 webhook 通知作废，也可以在页面手动刷新",
+        numeric=True,
+        note="已知限制：这个值读的是真实进程环境变量（os.environ），不是 .env 文件合并后的值——只改 .env 不会生效，除非这台机器本来就在真实环境变量里设了同名变量",
+    ),
     # ---- 运行参数 / 定时任务 ----
     SettingField(
         "SCHEDULE_INTERVAL_MINUTES", "定时任务间隔（分钟）", "runtime", "schedule",
@@ -386,6 +397,33 @@ def _test_zabbix(cfg: dict[str, str]) -> tuple[bool, str]:
             pass
 
 
+def check_netbox_status(base_url: str, auth_header: str, *, timeout: float = 6.0) -> dict:
+    """最小探测：GET `{NETBOX_URL}/api/status/`（NetBox 标准端点），不跑全量拓扑拉取。"""
+    import json as _json
+
+    url = base_url.rstrip("/") + "/api/status/"
+    req = urllib.request.Request(url, headers={"Authorization": auth_header, "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return _json.loads(resp.read().decode("utf-8"))
+
+
+def _test_netbox(cfg: dict[str, str]) -> tuple[bool, str]:
+    from netops_ai.netbox import auth_header
+
+    if not cfg.get("NETBOX_URL"):
+        return False, "没配 NETBOX_URL"
+    if not cfg.get("NETBOX_TOKEN"):
+        return False, "没配 NETBOX_TOKEN"
+    try:
+        status = check_netbox_status(cfg["NETBOX_URL"], auth_header(cfg["NETBOX_TOKEN"]))
+        version = status.get("netbox-version", "未知版本")
+        return True, f"连接成功，NetBox 版本 {version}"
+    except urllib.error.HTTPError as exc:
+        return False, f"连接失败：HTTP {exc.code}（token 是否正确/过期？）"
+    except Exception as exc:  # noqa: BLE001
+        return False, f"连接失败：{type(exc).__name__}: {exc}"
+
+
 def _test_llm(cfg: dict[str, str]) -> tuple[bool, str]:
     from netops_ai.llm.client import LLMClient, LLMError
 
@@ -406,6 +444,7 @@ def _test_llm(cfg: dict[str, str]) -> tuple[bool, str]:
 
 _TESTERS = {
     "zabbix": _test_zabbix,
+    "netbox": _test_netbox,
     "llm": _test_llm,
 }
 

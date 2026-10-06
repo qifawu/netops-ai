@@ -33,6 +33,7 @@
 - 告警流水线：webhook、合并窗口、事件去重、飞书卡片
 - 通过 SSH/Telnet 只读访问设备（Cisco IOS），命令白名单在前；只读的 Zabbix 客户端
 - 结构化结论：六类假设清单，判不出时老实说「判不出」
+- 拓扑可以来自 NetBox（可选、只读，带 webhook 即时刷新），也可以是一个 YAML 文件
 - 剧本（SOP）只做建议，带 linter；六个示例：接口 down、OSPF 邻接、BGP 会话、设备重启、CPU 高、接口错误
 - 定时巡检：读 Zabbix 历史的趋势检测 + 只读登设备的实时状态检查，有历史、与上次对比、Markdown/HTML 导出
 - 命令审计：AI 跑过的每条命令、被拒的每条命令
@@ -48,7 +49,8 @@
 |---|---|
 | `zbx_*` | Zabbix 只读查询：主机、监控项、历史、趋势、syslog、问题、流量排行、图表 |
 | `device_show` | 过命令白名单后，在设备上执行 `show` 命令 |
-| `topology_neighbors` | 从 `topology.yaml` 查设备或接口的邻居 |
+| `topology_neighbors` | 查设备或接口的邻居——配了 NetBox 就读 NetBox，否则读 `topology.yaml` |
+| `nb_devices`、`nb_topology` | NetBox 台账（只读，配了 NetBox 才有） |
 | `sop_lookup` | 查找匹配的剧本——只给建议，从不执行 |
 | `doc_search` | 对你自己的文档做关键词（BM25）检索 |
 | `run_inspection`、`get_analysis` | 跑一次巡检、查之前的结论 |
@@ -58,6 +60,7 @@
 | 命令 | 用途 |
 |---|---|
 | `python zbx-cli.py hosts` | 只读 Zabbix 命令行，和 agent 共用同一份工具定义；`python zbx-cli.py tools` 会打印它们 |
+| `python -m netops_ai.netbox_cli devices` | 只读 NetBox 台账命令行（`devices`、`neighbors <设备>`、`topology`）；需要 `NETBOX_URL` 和 `NETBOX_TOKEN` |
 | `python tools/demo_replay.py` | 回放落盘的告警记录并渲染飞书卡片，不需要网络 |
 | `python tools/seed_demo.py` | 往 `records/` 灌 6 条合成告警，让看板有数据 |
 | `python tools/sop_lint.py` | 检查剧本：工具真实、参数真实、命令能过白名单 |

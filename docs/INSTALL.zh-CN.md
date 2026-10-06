@@ -93,6 +93,7 @@ cp env.example .env       # 然后编辑；.env 已被 git 忽略
 | 大模型 | `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`（可选 `LLM_PROVIDER`） | `python tools/llm_doctor.py` 用多轮工具回放检查链路 |
 | 飞书 | `FEISHU_WEBHOOK_URL`，或 `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_CHAT_ID` | 可选；不配的话结论照样落盘并显示在看板上 |
 | 预算 | `ANALYSIS_TOKEN_BUDGET`（默认 60000） | 单次取证的软上限 |
+| NetBox（可选） | `NETBOX_URL`、`NETBOX_TOKEN`、`NETBOX_WEBHOOK_SECRET`、`TOPOLOGY_CACHE_TTL` | 从 NetBox 取拓扑，代替文件——见 [3.5](#35-从-netbox-取拓扑可选) |
 | 拓扑 | `topology.yaml` | 设备、管理 IP、别名（例如设备 `D1` 在 Zabbix 里叫 `D1-vios`）和连线。**别名必须显式写，没有模糊匹配** |
 
 ### 3.2 设备：只读账号
@@ -136,6 +137,31 @@ return 'OK';
 - **试验用实验室**：[LAB.zh-CN.md](LAB.zh-CN.md) 描述了参考实验环境（7 台 Cisco、Zabbix、trap、制造过的故障）以及怎么自己搭一个类似的。
 - **文档检索**：索引随仓库是空的。先用 3 篇示例笔记试一下：`python tools/kb_ingest.py examples/kb`，然后打开知识库页。自己用的话，灌你有权使用的文档（`python tools/kb_ingest.py --help`）；agent 的 `doc_search` 工具返回的片段会标成厂商文档，不会当作设备证据。
 - **定时巡检**：API 进程运行期间，每 `SCHEDULE_INTERVAL_MINUTES`（默认 60）分钟跑一次。
+
+### 3.5 从 NetBox 取拓扑（可选）
+
+默认拓扑来自 `topology.yaml`。如果你的资产台账在 NetBox 里，在 `.env` 里设 `NETBOX_URL` 和 `NETBOX_TOKEN`，设备和连线就改从 NetBox 取，文件留作离线兜底。这个对接是**只读**的（只发 GET 请求，访问 `/api/dcim/devices/` 和 `/api/dcim/interfaces/`）。
+
+agent 和看板从 NetBox 读哪些东西：
+
+| NetBox 字段 | 用途 |
+|---|---|
+| 设备名、`status` | 只画状态是 *active* 的设备；offline / decommissioning / inventory / failed 的不画，也不当邻居 |
+| 设备角色（slug：`core`、`aggregation`、`access`） | 拓扑页的分层；agent 回答里「这个邻居是不是在我上面」 |
+| 主 IPv4 | agent 连接用的管理地址 |
+| 接口和线缆（link peers） | 设备之间的连线 |
+| 自定义字段 `zabbix_host` | 这台设备在 Zabbix 里的主机名（就是别名，没有模糊匹配） |
+| 设备类型、平台、站点、机架、序列号、自定义字段 `software_version` | 在设备详情里显示 |
+
+- **Token。** NetBox 4.7 起用 v2 token：要贴完整的 `nbt_<key>.<plaintext>` 串；老的 v1 token 也能用。只读 token 就够。
+- **兜底。** NetBox 连不上时，会在一段时间内沿用上一次成功的结果，并在看板上写明；没有历史结果就退回 `topology.yaml` 并记下原因。结果缓存 `TOPOLOGY_CACHE_TTL` 秒（默认 600）。
+- **即时刷新。** 在 NetBox 里建一条事件规则，设备、接口、线缆变更时调用 webhook `POST /webhooks/netbox`，并把同一个密钥填进 `NETBOX_WEBHOOK_SECRET`；请求用 HMAC-SHA512 签名（`X-Hub-Signature`）校验。页面上也有「重新读取」按钮。前面放反向代理时，这条路由和 Zabbix webhook 一样处理：按来源地址放行（见[保护接口和看板](#保护接口和看板)）。
+- **命令行。** `python -m netops_ai.netbox_cli devices`、`neighbors D1`、`topology`——看到的数据和 agent 的 `nb_devices`、`nb_topology`、`topology_neighbors` 工具一致。
+- **检查。** 拓扑页顶栏会写「拓扑源：NetBox」或「本地 yaml」；系统设置里有 NetBox 的连接测试。
+
+NetBox 作为拓扑源时的拓扑页（演示模式已遮住 IP）：
+
+<p align="center"><img src="images/ui-topology-netbox.png" width="820"></p>
 
 ## 排障
 

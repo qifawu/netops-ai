@@ -36,7 +36,8 @@ All tools are read-only and registered in one place (`netops_ai/graph/chat_agent
 |---|---|
 | `zbx_*` | Zabbix read-only queries — hosts, items, history, trends, syslog, problems, top talkers, chart (generated from `zabbix/cli.py` so the CLI and the tools share one spec table) |
 | `device_show`, `device_show_many` | Run `show` commands on a device through the whitelist |
-| `topology_neighbors` | Neighbors of a device/interface from `topology.yaml` |
+| `topology_neighbors` | Neighbors of a device/interface — from NetBox when `NETBOX_URL` is set, otherwise from `topology.yaml` |
+| `nb_devices`, `nb_topology` | NetBox inventory (read-only; only present when NetBox is configured) |
 | `sop_lookup` | Find a matching SOP playbook (it *advises*; it never executes anything) |
 | `doc_search` | BM25 search over your local documentation index |
 | `run_inspection`, `list_analyses`, `get_analysis` | Run/read an inspection, look up earlier conclusions |
