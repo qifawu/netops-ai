@@ -38,7 +38,6 @@ Zabbix 触发器 ──► POST /webhooks/zabbix ──► 立刻返回 200（Za
 | `topology_neighbors` | 查某台设备/接口的邻居——配了 `NETBOX_URL` 就读 NetBox，否则读 `topology.yaml` |
 | `nb_devices`、`nb_topology` | NetBox 台账（只读；只有配了 NetBox 才出现） |
 | `sop_lookup` | 查找匹配的剧本（只给建议，从不执行） |
-| `doc_search` | 对你本地文档索引做 BM25 检索 |
 | `run_inspection`、`list_analyses`、`get_analysis` | 跑/读巡检，查之前的结论 |
 
 工具结果只返回事实。结果为空就说为空并回显查询条件；被截断就说被截断。「下一步试试 X」这类路由建议只放在系统提示或剧本里，从不放进工具结果，这样不管哪个 agent 来调用，工具都保持中立。
@@ -79,7 +78,7 @@ Zabbix 客户端也是同样的结构：每个调用发出前都先过方法白�
 
 ## 网页看板的结构
 
-`web/` 是 Vite + React + TypeScript 应用，构建后（`web/dist`）由 FastAPI 进程提供。它只读 `netops_ai/api/` 里的 JSON 接口；页面有：总览、告警与结论、设备与拓扑、巡检、命令审计、知识库、设置。演示模式开关会遮住 IP 和编号，方便截图。
+`web/` 是 Vite + React + TypeScript 应用，构建后（`web/dist`）由 FastAPI 进程提供。它只读 `netops_ai/api/` 里的 JSON 接口；页面有：总览、告警与结论、设备与拓扑、巡检、命令审计、设置。演示模式开关会遮住 IP 和编号，方便截图。
 
 ## 改东西之前值得知道的设计规则
 

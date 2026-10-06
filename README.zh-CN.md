@@ -35,8 +35,7 @@
 - 剧本（SOP）只做建议，带 linter；六个示例：接口 down、OSPF 邻接、BGP 会话、设备重启、CPU 高、接口错误
 - 定时巡检：读 Zabbix 历史的趋势检测 + 只读登设备的实时状态检查，有历史、与上次对比、Markdown/HTML 导出
 - 命令审计：AI 跑过的每条命令、被拒的每条命令
-- 本地文档检索（索引随仓库是空的，用 `tools/kb_ingest.py` 灌库）
-- 中英文网页看板：总览、告警与结论、拓扑、巡检、审计、知识库、设置；演示模式自动遮住 IP 和编号，方便截图
+- 中英文网页看板：总览、告警与结论、拓扑、巡检、审计、设置；演示模式自动遮住 IP 和编号，方便截图
 - 离线回放和示例数据（`tools/demo_replay.py`、`tools/seed_demo.py`）
 
 ## 工具
@@ -50,7 +49,6 @@
 | `topology_neighbors` | 查设备或接口的邻居——配了 NetBox 就读 NetBox，否则读 `topology.yaml` |
 | `nb_devices`、`nb_topology` | NetBox 台账（只读，配了 NetBox 才有） |
 | `sop_lookup` | 查找匹配的剧本——只给建议，从不执行 |
-| `doc_search` | 对你自己的文档做关键词（BM25）检索 |
 | `run_inspection`、`get_analysis` | 跑一次巡检、查之前的结论 |
 
 **我们带的命令行工具**，除标注的外都能离线运行：
@@ -62,7 +60,6 @@
 | `python tools/demo_replay.py` | 回放落盘的告警记录并渲染飞书卡片，不需要网络 |
 | `python tools/seed_demo.py` | 往 `records/` 灌 6 条合成告警，让看板有数据 |
 | `python tools/sop_lint.py` | 检查剧本：工具真实、参数真实、命令能过白名单 |
-| `python tools/kb_ingest.py <目录>` | 用 `.md/.txt/.html/.pdf` 建本地文档索引（SQLite FTS5） |
 | `python tools/llm_doctor.py` | 用多轮工具调用回放检查你的大模型接口（会调模型） |
 
 ## 效果
@@ -99,9 +96,7 @@
 
 <p align="center"><img src="docs/images/ui-inspection.png" alt="自动化巡检" width="900"></p>
 
-**知识库**：
-
-<p align="center"><img src="docs/images/ui-knowledge.png" alt="知识库" width="760"></p>
+上面的截图多数是英文界面；看板也有中文界面。
 
 ### 我们注入了哪些故障、它怎么说
 

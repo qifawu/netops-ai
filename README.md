@@ -35,8 +35,7 @@
 - Playbooks (SOP) as advice, with a linter; six examples: interface down, OSPF adjacency, BGP session, device restart, high CPU, interface errors
 - Scheduled inspection: trend detectors on Zabbix history plus live read-only status checks, history, diff against the last run, Markdown/HTML export
 - Command audit: every command the AI ran and every one that was refused
-- Local documentation search (the index ships empty; fill it with `tools/kb_ingest.py`)
-- Web dashboard in Chinese and English: overview, incidents, topology, inspection, audit, knowledge base, settings; a demo mode that masks IPs and IDs for screenshots
+- Web dashboard in Chinese and English: overview, incidents, topology, inspection, audit, settings; a demo mode that masks IPs and IDs for screenshots
 - Replay and demo-data scripts (`tools/demo_replay.py`, `tools/seed_demo.py`) for trying the dashboard without a lab
 
 ## Tools
@@ -50,7 +49,6 @@
 | `topology_neighbors` | Neighbors of a device or interface — from NetBox if configured, else `topology.yaml` |
 | `nb_devices`, `nb_topology` | NetBox inventory (read-only, when NetBox is configured) |
 | `sop_lookup` | Find the matching playbook — it advises, it never executes |
-| `doc_search` | Keyword (BM25) search over your own documents |
 | `run_inspection`, `get_analysis` | Run an inspection, look up an earlier conclusion |
 
 **Command-line tools** we ship, all runnable offline unless noted:
@@ -62,7 +60,6 @@
 | `python tools/demo_replay.py` | Replay saved alert records and render the Feishu card, no network needed |
 | `python tools/seed_demo.py` | Fill `records/` with six synthetic incidents so the dashboard has data |
 | `python tools/sop_lint.py` | Lint playbooks: real tools, real parameters, commands the whitelist accepts |
-| `python tools/kb_ingest.py <dir>` | Build the local documentation index (SQLite FTS5) from `.md/.txt/.html/.pdf` |
 | `python tools/llm_doctor.py` | Check your LLM endpoint with a multi-turn tool-call replay (calls the model) |
 
 ## What it looks like
@@ -99,9 +96,7 @@ We shut down a BGP neighbor on V1 (`neighbor 10.0.0.2 shutdown`). Six alerts arr
 
 <p align="center"><img src="docs/images/ui-inspection.png" alt="Inspection" width="900"></p>
 
-**Knowledge base** and **settings** (Chinese UI; the dashboard also has an English UI):
-
-<p align="center"><img src="docs/images/ui-knowledge.png" alt="Knowledge base" width="760"></p>
+The screenshots above are mostly the English UI; the dashboard also has a Chinese UI.
 
 ### What we injected and what it said
 
