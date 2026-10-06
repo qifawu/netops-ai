@@ -526,6 +526,9 @@ def derive_confidence(parsed: dict) -> str:
 
     if parsed.get("undistinguishable_candidates") and confidence == "high":
         return "medium"
+    # 一条可核查的证据引文都没有，就不给 high（取证被预算截断后只带出结论、没带出证据时会这样）。
+    if confidence == "high" and not (parsed.get("evidence") or []):
+        return "medium"
     return confidence
 
 

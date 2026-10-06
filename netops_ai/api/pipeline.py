@@ -511,6 +511,11 @@ def _redact_env_values(text: str, env: dict | None = None) -> str:
     for key, value in env.items():
         if not value or len(str(value)) < 3:
             continue
+        # Zabbix 用户名不是密钥；纯字母的（Zabbix 默认的 `Admin`）同时是设备输出里的常用词，
+        # 替换它会把 `Idle (Admin)`、`Admin. shutdown` 这类证据原文改成占位符，引文就对不上了。
+        # 带数字或连字符的用户名（`ai-readonly`）照旧遮掉。
+        if key == "ZABBIX_USER" and re.fullmatch(r"[A-Za-z]+", str(value)):
+            continue
         # Hostnames/IPs are also lab-specific values; keep names, hide values.
         if key.endswith(("PASSWORD", "TOKEN", "SECRET", "KEY")) or key in {
             "DEVICE_HOST",
@@ -599,6 +604,8 @@ FORENSICS_SYSTEM_PROMPT = """你是网络运维真实告警的根因分析取证
 - 不要编造监控项、itemid、设备输出、日志、配置或因果关系。
 - 引文必须逐字来自原文——本会话的工具返回，或提示里给出的告警原文/第一信源——并注明出处；不改写、不拼接、不补全。
 - 分清每条证据的时间：故障窗口内的日志/历史、取证时刻的设备状态（当前快照）、与时间无关的事实。告警已经恢复时，当前快照不代表故障时刻。
+- 引用 trap、日志、事件当证据前，先核对它的时间戳是否落在这条告警的故障窗口内（告警时间前后十来分钟）。更早的记录——几个小时前的一次启动、上一次故障留在日志里的内容——只能当背景，不能当本次的原因；设备已经连续运行数小时（uptime 很长）时，不要下「刚重启」的结论。
+- 告警本身是恢复类的（邻居回到 FULL / Established、链路回到 up）且设备当前状态正常时，结论写成「已恢复」，并说明恢复前那次故障（只在故障窗口内有证据时才写）；不要拿更早的日志编出新的根因，置信度不高于 medium。
 - 本系统取证用的只读账号（如 ai-readonly）的登录/登出记录是取证动作本身留下的，不是故障证据。
 - 回答“我查过什么”只能依据本会话真实工具调用；看不到记录就说看不到。
 - 工具返回里如果有 markdown 字段，原样贴出来，不要自己重排。

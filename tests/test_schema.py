@@ -158,9 +158,19 @@ class TestBusinessRules(unittest.TestCase):
     def test_唯一支持且其余排除时置信度是high(self):
         parsed = {
             "undistinguishable_candidates": [],
+            "evidence": [{"claim": "c", "source": "s", "source_from": "device"}],
             "hypothesis_checklist": _checklist(local_action=STATUS_SUPPORTED),
         }
         self.assertEqual(derive_confidence(parsed), "high")
+
+    def test_一条证据都没有时最多是medium(self):
+        """取证被预算截断后只带出结论、没带出证据：不给 high。"""
+        parsed = {
+            "undistinguishable_candidates": [],
+            "evidence": [],
+            "hypothesis_checklist": _checklist(local_action=STATUS_SUPPORTED),
+        }
+        self.assertEqual(derive_confidence(parsed), "medium")
 
     def test_唯一支持但还有方向没排除时置信度是medium(self):
         parsed = {

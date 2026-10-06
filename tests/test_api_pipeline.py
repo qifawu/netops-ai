@@ -875,6 +875,13 @@ class TestRedactionRespectsWordBoundaries(unittest.TestCase):
         # 用 `\\b` 做边界的话这条会漏：`!` 和后面的空格都是非单词字符，中间不算边界。
         self.assertEqual(self._r("secret is p@ss! done"), "secret is <DEVICE_PASSWORD> done")
 
+    def test_Zabbix用户名是常用词时不替换(self):
+        """Zabbix 默认用户 `Admin` 同时是设备输出里的词（`Idle (Admin)`），替换会让证据引文对不上。"""
+        from netops_ai.api.pipeline import _redact_env_values
+        env = {"ZABBIX_USER": "Admin", "DEVICE_USERNAME": "ai-readonly"}
+        self.assertEqual(_redact_env_values("State Idle (Admin)", env), "State Idle (Admin)")
+        self.assertEqual(_redact_env_values("user: ai-readonly", env), "user: <DEVICE_USERNAME>")
+
     def test_没提高最短长度(self):
         # 提高最短长度等于让短密码原样漏进证据和 prompt，拿安全换好看。
         self.assertNotIn("eve", self._r("pw eve"))
