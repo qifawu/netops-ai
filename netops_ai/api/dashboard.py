@@ -823,9 +823,14 @@ def _load_chat_traces(trace_dir: Path | None = None) -> list[dict]:
     rows = []
     for path in paths:
         try:
-            rows.append(json.loads(path.read_text(encoding="utf-8")))
+            trace = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
+        # 告警取证（session_id 以 pipeline- 开头）也会落一份 trace，但它的命令已经在告警记录里算过一遍；
+        # 不能再当「对话」算第二遍，否则审计页的「对话查询」被告警取证撑大、每条命令被统计两次。
+        if str(trace.get("session_id") or "").startswith("pipeline-"):
+            continue
+        rows.append(trace)
     if sig is not None:
         _CHAT_TRACES_CACHE.update(sig=sig, rows=rows)
     return rows

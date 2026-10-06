@@ -69,25 +69,58 @@
 
 ## 效果
 
-离线演示（不需要网络、设备、模型）：
+下面所有图都来自真实运行：一套虚拟 Cisco 实验网络（7 台、三层），故障是在设备上手工制造的，用的是真实的 Zabbix、NetBox 和大模型，没有任何模拟数据。看板的演示模式把 IP 地址遮住了。
 
-<p align="center"><img src="docs/images/demo-replay.png" alt="离线回放" width="860"></p>
+### 一次真实故障，从头到尾
 
-网页看板：
+我们在 V1 上 shutdown 了一个 BGP 邻居（`neighbor 10.0.0.2 shutdown`）。会话两端一共来了 6 条告警（SNMP trap、syslog、Zabbix 触发器）。它们被合并成**一个事件**，用只读工具取证，最后只出一张卡片和一个看板页面。
 
-| | |
+**推到群里的卡片**（用这次事件的卡片 JSON 渲染）：
+
+<p align="center"><img src="docs/images/real-card.png" alt="飞书卡片" width="640"></p>
+
+**同一个事件在看板上**——结论、6 条引用的证据原文、两台设备的告警时间线、取证步骤、六类假设清单：
+
+<p align="center"><img src="docs/images/real-incident.png" alt="告警与结论页" width="900"></p>
+
+### 看板的其它页面
+
+**系统总览**——处理了多少故障、多快、多少次老实转人工、白名单拦下多少条命令：
+
+<p align="center"><img src="docs/images/real-overview.png" alt="系统总览" width="900"></p>
+
+**设备与拓扑**——从 NetBox 读的分层拓扑，叠加近期故障：
+
+<p align="center"><img src="docs/images/real-topology.png" alt="设备与拓扑" width="900"></p>
+
+**命令审计**——agent 跑过的每条命令和被白名单拒绝的每条命令：
+
+<p align="center"><img src="docs/images/real-audit.png" alt="命令审计" width="900"></p>
+
+**自动化巡检**——趋势发现加对每台设备的只读状态检查：
+
+<p align="center"><img src="docs/images/ui-inspection.png" alt="自动化巡检" width="900"></p>
+
+**知识库**：
+
+<p align="center"><img src="docs/images/ui-knowledge.png" alt="知识库" width="760"></p>
+
+### 我们注入了哪些故障、它怎么说
+
+每个故障都是在实验设备上手工制造、事后复位的。大致结果如下（因为取证是大模型做的，同一个故障多跑几次结论会有些波动）：
+
+| 故障 | 系统的结论 |
 |---|---|
-| 系统总览<br><img src="docs/images/ui-overview.png" width="460"> | 告警与结论<br><img src="docs/images/ui-incident.png" width="460"> |
-| 命令审计<br><img src="docs/images/ui-audit.png" width="460"> | 设备与拓扑<br><img src="docs/images/ui-topology.png" width="460"> |
+| 接口被人为 shutdown | 控制台上被关的，高置信 |
+| BGP 邻居被 shutdown | 一个事件覆盖两端：V1 上被关 |
+| OSPF hello / 认证 / area 不一致、passive 接口 | 在有问题的那一侧点出不一致；对端那侧有时会漏 |
+| 设备 `reload` | 点出是 reload；老实说分不出是人还是脚本发起的 |
+| 接口抖动 | 控制台上反复 shutdown / no shutdown |
+| 45 秒内自己恢复的故障 | 报出被关过，并说明已经恢复 |
+| 两件不相干的事同时发生（一个接入口、一个 BGP 邻居） | 保持为两个独立事件 |
+| 整台设备断电 | 邻居侧结论是「对端失联」，并写明哪些分不开 |
 
-### 看板和卡片的更多页面
-
-| | |
-|---|---|
-| 飞书卡片——推到群里的样子。左：找到了根因；右：老实说「判不出」并给出下一条该敲的命令<br><img src="docs/images/feishu-card.png" width="460"> | 自动化巡检——趋势发现加对每台设备的只读状态检查<br><img src="docs/images/ui-inspection.png" width="460"> |
-| 知识库——检索你自己的文档；图里是 `examples/kb/` 的三篇示例笔记<br><img src="docs/images/ui-knowledge.png" width="460"> | 系统设置——在页面里改 `.env`，密钥掩码显示<br><img src="docs/images/ui-settings.png" width="460"> |
-
-卡片图是用两条合成示例的卡片 JSON 渲染的示意图（不是飞书客户端截图）。`python tools/seed_demo.py` 会灌入六条合成告警，不用任何配置就能把所有页面点一遍。
+这是在实验室验证过的只读助手，不是经过生产验证的产品。
 
 ## 怎么部署
 

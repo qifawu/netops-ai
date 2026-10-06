@@ -1030,6 +1030,8 @@ def _redact_env_values(value: Any) -> Any:
             if v
             and len(v) >= 4
             and any(marker in k.upper() for marker in ("PASSWORD", "TOKEN", "KEY", "COMMUNITY", "HOST", "URL", "USER"))
+            # 纯字母的用户名（Zabbix 默认的 `Admin`）同时是设备输出里的常用词，不当密钥替换
+            and not (k.upper().endswith("USER") and re.fullmatch(r"[A-Za-z]+", v))
         },
         key=len,
         reverse=True,
@@ -1037,7 +1039,8 @@ def _redact_env_values(value: Any) -> Any:
     if isinstance(value, str):
         text = value
         for secret in secrets:
-            text = text.replace(secret, "<redacted>")
+            # 只换独立出现的值：裸 replace 会把 `Administrative` 切成 `<redacted>istrative`
+            text = re.sub(rf"(?<![A-Za-z0-9]){re.escape(secret)}(?![A-Za-z0-9])", "<redacted>", text)
         return text
     if isinstance(value, list):
         return [_redact_env_values(v) for v in value]

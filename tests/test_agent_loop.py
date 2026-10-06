@@ -1181,3 +1181,23 @@ class TestWrapUpHardening(unittest.TestCase):
         src = inspect.getsource(loop._wrap_up_call)
         self.assertIn("没有直接证据的因果关系一个字都不许写", src)
         self.assertIn("不要给出任何修改配置的建议", src)
+
+
+class TestTraceRedactionKeepsPlainWords(unittest.TestCase):
+    """落盘的取证轨迹也要脱敏，但不能把设备输出里的常用词切碎（`Administrative` → `<redacted>istrative`）。"""
+
+    CFG = {"ZABBIX_USER": "Admin", "DEVICE_PASSWORD": "S3cretPw!", "DEVICE_HOST": "192.0.2.50", "DEVICE_USERNAME": "ai-readonly"}
+
+    def _r(self, text):
+        with mock.patch.object(agent_loop, "env", return_value=self.CFG):
+            return agent_loop._redact_env_values(text)
+
+    def test_纯字母用户名不替换(self):
+        self.assertEqual(self._r("Idle (Admin) Administrative Shutdown"), "Idle (Admin) Administrative Shutdown")
+
+    def test_密码主机和带连字符的用户名照旧遮掉(self):
+        self.assertEqual(self._r("pw S3cretPw! host 192.0.2.50 user ai-readonly"),
+                         "pw <redacted> host <redacted> user <redacted>")
+
+    def test_只换独立出现的值(self):
+        self.assertEqual(self._r("x192.0.2.500y 192.0.2.50"), "x192.0.2.500y <redacted>")

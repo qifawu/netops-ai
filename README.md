@@ -69,25 +69,58 @@
 
 ## What it looks like
 
-Offline demo (no network, no devices, no model):
+Everything below comes from real runs: a virtual Cisco lab (7 nodes, 3 layers), faults injected by hand on the devices, a real Zabbix, NetBox and LLM. No mock data. The dashboard's demo mode masks IP addresses.
 
-<p align="center"><img src="docs/images/demo-replay.png" alt="demo replay" width="860"></p>
+### A real fault, end to end
 
-Dashboard:
+We shut down a BGP neighbor on V1 (`neighbor 10.0.0.2 shutdown`). Six alerts arrived from both ends of the session (SNMP traps, syslog, Zabbix triggers). They were merged into **one incident**, investigated with read-only tools, and delivered as one card and one dashboard page.
 
-| | |
+**The card that lands in the chat** (rendered from the card JSON of that incident):
+
+<p align="center"><img src="docs/images/real-card.png" alt="Feishu card" width="640"></p>
+
+**The same incident on the dashboard** — conclusion, six pieces of quoted evidence, the alert timeline from both devices, the investigation steps, and the six-hypothesis checklist:
+
+<p align="center"><img src="docs/images/real-incident-en.png" alt="Incident page" width="900"></p>
+
+### The rest of the dashboard
+
+**Overview** — how many incidents were handled, how fast, how many were honestly handed to a human, how many commands the whitelist blocked:
+
+<p align="center"><img src="docs/images/real-overview-en.png" alt="Overview" width="900"></p>
+
+**Devices and topology** — layered topology read from NetBox, recent faults overlaid:
+
+<p align="center"><img src="docs/images/real-topology-en.png" alt="Topology" width="900"></p>
+
+**Command audit** — every command the agent ran and every one the whitelist refused:
+
+<p align="center"><img src="docs/images/real-audit-en.png" alt="Command audit" width="900"></p>
+
+**Automated inspection** — trend findings plus read-only status checks of every device (screenshot in the Chinese UI):
+
+<p align="center"><img src="docs/images/ui-inspection.png" alt="Inspection" width="900"></p>
+
+**Knowledge base** and **settings** (Chinese UI; the dashboard also has an English UI):
+
+<p align="center"><img src="docs/images/ui-knowledge.png" alt="Knowledge base" width="760"></p>
+
+### What we injected and what it said
+
+Each fault was injected by hand on the lab devices and restored afterwards. Roughly what came out (results vary a little from run to run, because the investigation is done by an LLM):
+
+| Fault | What the system concluded |
 |---|---|
-| Overview<br><img src="docs/images/ui-overview-en.png" width="460"> | Incident and conclusion<br><img src="docs/images/ui-incident.png" width="460"> |
-| Command audit<br><img src="docs/images/ui-audit-en.png" width="460"> | Topology<br><img src="docs/images/ui-topology-en.png" width="460"> |
+| Interface shut down by hand | Shut down from the console; high confidence |
+| BGP neighbor shut down | One incident covering both ends: shut down on V1 |
+| OSPF hello / authentication / area mismatch, passive interface | Names the mismatch on the side that has it; the far side sometimes misses it |
+| Device `reload` | Reload; says honestly it cannot tell whether a person or a script did it |
+| Interface flapping | Repeated shutdown / no shutdown from the console |
+| Fault that heals itself in 45 s | Reports the shutdown and that it has already recovered |
+| Two unrelated faults at once (an access port and a BGP neighbor) | Kept as separate incidents |
+| Whole device powered off | The neighbors conclude "the far device is unreachable" and say what could not be told apart |
 
-### More of the dashboard and the card
-
-| | |
-|---|---|
-| Feishu card — what lands in the chat. Left: root cause found. Right: honest "can't tell" with the next command to run<br><img src="docs/images/feishu-card.png" width="460"> | Automated inspection — trend findings plus read-only status checks of every device<br><img src="docs/images/ui-inspection.png" width="460"> |
-| Knowledge base — search your own documents; shown with the three sample notes in `examples/kb/`<br><img src="docs/images/ui-knowledge.png" width="460"> | Settings — edit `.env` from the page; secrets are masked<br><img src="docs/images/ui-settings.png" width="460"> |
-
-The cards are rendered from the JSON of two synthetic examples (an illustration, not a screenshot of the Feishu client). `python tools/seed_demo.py` fills the dashboard with six synthetic incidents so you can click through everything without any setup.
+It is a lab-validated, read-only assistant, not a production-tested product.
 
 ## Deploy
 
