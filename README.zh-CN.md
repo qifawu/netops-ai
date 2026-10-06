@@ -38,7 +38,7 @@
 - 命令审计：AI 跑过的每条命令、被拒的每条命令
 - 本地文档检索（索引随仓库是空的，用 `tools/kb_ingest.py` 灌库）
 - 中英文网页看板：总览、告警与结论、拓扑、巡检、审计、知识库、设置；演示模式自动遮住 IP 和编号，方便截图
-- 离线回放和回归工具（`tools/demo_replay.py`、`tools/run_regression.py`）
+- 离线回放和示例数据（`tools/demo_replay.py`、`tools/seed_demo.py`）
 
 ## 工具
 
@@ -63,7 +63,6 @@
 | `python tools/sop_lint.py` | 检查剧本：工具真实、参数真实、命令能过白名单 |
 | `python tools/kb_ingest.py <目录>` | 用 `.md/.txt/.html/.pdf` 建本地文档索引（SQLite FTS5） |
 | `python tools/llm_doctor.py` | 用多轮工具调用回放检查你的大模型接口（会调模型） |
-| `python -m tools.run_regression <用例>` | 把一个录下来的用例多次送进模型回放（会调模型） |
 
 ## 效果
 

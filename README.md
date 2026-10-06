@@ -38,7 +38,7 @@
 - Command audit: every command the AI ran and every one that was refused
 - Local documentation search (the index ships empty; fill it with `tools/kb_ingest.py`)
 - Web dashboard in Chinese and English: overview, incidents, topology, inspection, audit, knowledge base, settings; a demo mode that masks IPs and IDs for screenshots
-- Offline replay and regression tools (`tools/demo_replay.py`, `tools/run_regression.py`)
+- Offline replay and demo data (`tools/demo_replay.py`, `tools/seed_demo.py`)
 
 ## Tools
 
@@ -63,7 +63,6 @@
 | `python tools/sop_lint.py` | Lint playbooks: real tools, real parameters, commands the whitelist accepts |
 | `python tools/kb_ingest.py <dir>` | Build the local documentation index (SQLite FTS5) from `.md/.txt/.html/.pdf` |
 | `python tools/llm_doctor.py` | Check your LLM endpoint with a multi-turn tool-call replay (calls the model) |
-| `python -m tools.run_regression <case>` | Replay a recorded case through the model several times (calls the model) |
 
 ## What it looks like
 

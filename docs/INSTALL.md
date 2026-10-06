@@ -135,7 +135,6 @@ Trigger a test: `curl -X POST http://127.0.0.1:8000/webhooks/zabbix -H 'content-
 - **SNMP traps** (faster than polling for link/OSPF/BGP events): `deploy/trap/` contains lab scripts to install `snmptrapd` and add trap items. They write device/guest configuration in a lab; read them before running anything.
 - **A lab to try it on**: [LAB.md](LAB.md) describes the reference lab (7 Cisco nodes, Zabbix, traps, the faults we injected) and how to rebuild something similar.
 - **Documentation search**: the index ships empty. Try it with the three sample notes: `python tools/kb_ingest.py examples/kb`, then open the Knowledge page. For your own use, ingest documents you are licensed to use (`python tools/kb_ingest.py --help`); the agent's `doc_search` tool then returns passages labelled as vendor documentation (never as device evidence).
-- **Regression runs**: `python -m tools.run_regression spike-demo` replays a case directory (`experiments/spike/<case>/input-zabbix.md` + `input-device.md`) through the model several times. A synthetic `spike-demo` case is included; this one calls your LLM.
 - **Scheduled inspection**: runs every `SCHEDULE_INTERVAL_MINUTES` (default 60) while the API process is up.
 
 ## Troubleshooting
