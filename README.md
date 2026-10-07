@@ -2,41 +2,33 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-**Alert-driven, read-only AI network troubleshooting.** A Zabbix alert comes in, an AI agent investigates the devices with read-only commands, and you get a root-cause conclusion that quotes the evidence it used — on a Feishu card and a web dashboard.
+**Alert-driven, read-only AI network troubleshooting.** On a Zabbix alert, an AI agent investigates the affected devices with read-only commands and produces a root-cause conclusion that quotes its evidence, delivered as a Feishu card and on a web dashboard.
 
 [Install](docs/INSTALL.md) · [Deploy: Zabbix & NetBox](docs/DEPLOY.md) · [Lab](docs/LAB.md) · [Architecture](docs/ARCHITECTURE.md) · [Playbooks](docs/PLAYBOOK-FORMAT.md) · [Contributing](CONTRIBUTING.md)
 
 <p align="center"><img src="docs/images/architecture.png" alt="architecture" width="1000"></p>
 
-## Current features
+## Features
 
-1. Zabbix sends an alert to `POST /webhooks/zabbix`.
-2. Related alerts are merged into one incident.
-3. The agent investigates with read-only tools only: Zabbix queries, `show` commands on the devices, topology neighbors, your playbooks.
-4. It writes a structured conclusion: root cause, confidence, the evidence it quoted, and — when it can't tell — what is still unknown and which command would settle it.
-5. The result goes to a Feishu card and the dashboard.
+- **Alert pipeline.** Zabbix posts to `POST /webhooks/zabbix`; related alerts are merged into one incident; an agent investigates with read-only tools; the conclusion is delivered as a Feishu card and on the dashboard.
+- **Read-only by construction.** Device commands pass a code-level whitelist (full `show …` commands only) and run under a read-only device account. The Zabbix client has a method whitelist.
+- **Structured conclusions.** Root cause, confidence and the quoted evidence, checked against six hypothesis families. If the cause cannot be determined, the result states what is missing and which command would settle it.
+- **Topology.** From NetBox (optional, read-only, webhook refresh) or from a YAML file.
+- **Playbooks (SOP).** YAML advice for the agent, with a linter; six examples: interface down, OSPF adjacency, BGP session, device restart, high CPU, interface errors.
+- **Scheduled inspection.** Trend detectors on Zabbix history, live read-only status checks, history, diff against the previous run, Markdown/HTML export.
+- **Command audit.** Every command the agent ran and every command that was refused.
+- **Dashboard.** Chinese and English: overview, incidents, topology, inspection, audit, settings. A demo mode masks IP addresses and IDs.
+- **Demo scripts.** `tools/demo_replay.py` and `tools/seed_demo.py` populate the dashboard without a lab.
 
 ## How it works
 
-- **Merge.** Alerts that arrive close together wait a short window (`ALERT_WINDOW_*`) and become one incident, so a link failure with ten knock-on alerts gives one conclusion, not ten.
-- **Investigate.** One tool-calling loop with a token budget, call limits, duplicate-call blocking and a no-progress stop. Playbooks (YAML) only *advise* the agent; they never execute anything.
-- **Two-layer read-only guard.** Layer 1 is code: every device command is checked against a whitelist before it is sent. Layer 2 is a read-only account you create on the device. The Zabbix client has a method whitelist the same way.
+- **Merge.** Alerts that arrive close together wait for a short window (`ALERT_WINDOW_*`) and are merged into one incident, so a single link failure with many derived alerts yields one conclusion. Alerts from topologically adjacent devices can be merged as well.
+- **Investigate.** One tool-calling loop with a token budget, call limits, duplicate-call blocking and a no-progress stop. Playbooks (YAML) only advise the agent; they never execute anything.
+- **Two-layer read-only guard.** Layer 1 is code: every device command is checked against a whitelist before it is sent. Layer 2 is a read-only account created on the device. The Zabbix client has a method whitelist in the same way.
 
 <p align="center"><img src="docs/images/guard.png" alt="two-layer read-only guard" width="900"></p>
 
-- **Conclude.** The model fills a strict schema. For each of six hypothesis families (local action, local hardware/resource, remote/upstream, link/path quality, management plane, monitoring artifact) it must say supported, ruled out (with counter-evidence) or undetermined — and "can't tell" must say what data and which command would settle it.
-
-## More features
-
-- Alert pipeline: webhook, merge window, incident de-duplication, Feishu card
-- Read-only device access over SSH/Telnet (Cisco IOS) behind the command whitelist; read-only Zabbix client
-- Structured conclusions with a six-family hypothesis checklist and an honest "can't tell"
-- Topology from NetBox (optional, read-only, with a webhook for instant refresh) or from a YAML file
-- Playbooks (SOP) as advice, with a linter; six examples: interface down, OSPF adjacency, BGP session, device restart, high CPU, interface errors
-- Scheduled inspection: trend detectors on Zabbix history plus live read-only status checks, history, diff against the last run, Markdown/HTML export
-- Command audit: every command the AI ran and every one that was refused
-- Web dashboard in Chinese and English: overview, incidents, topology, inspection, audit, settings; a demo mode that masks IPs and IDs for screenshots
-- Replay and demo-data scripts (`tools/demo_replay.py`, `tools/seed_demo.py`) for trying the dashboard without a lab
+- **Conclude.** The model fills a strict schema. For each of six hypothesis families (local action, local hardware/resource, remote/upstream, link/path quality, management plane, monitoring artifact) it must report supported, ruled out (with counter-evidence) or undetermined. An undetermined result must state which data and which command would settle it.
 
 ## Tools
 
@@ -68,7 +60,7 @@ Everything below comes from real runs: a virtual Cisco lab (7 nodes, 3 layers), 
 
 ### A real fault, end to end
 
-We shut down a BGP neighbor on V1 (`neighbor 10.0.0.2 shutdown`). Six alerts arrived from both ends of the session (SNMP traps, syslog, Zabbix triggers). They were merged into **one incident**, investigated with read-only tools, and delivered as one card and one dashboard page.
+Fault injected: `neighbor 10.0.0.2 shutdown` on V1. Six alerts arrived from both ends of the session (SNMP traps, syslog, Zabbix triggers). They were merged into **one incident**, investigated with read-only tools, and delivered as one card and one dashboard page.
 
 **The card that lands in the chat** (rendered from the card JSON of that incident):
 
@@ -80,7 +72,7 @@ We shut down a BGP neighbor on V1 (`neighbor 10.0.0.2 shutdown`). Six alerts arr
 
 ### The rest of the dashboard
 
-**Overview** — how many incidents were handled, how fast, how many were honestly handed to a human, how many commands the whitelist blocked:
+**Overview** — how many incidents were handled, how fast, how many were escalated to a human, how many commands the whitelist blocked:
 
 <p align="center"><img src="docs/images/real-overview-en.png" alt="Overview" width="900"></p>
 
@@ -100,24 +92,25 @@ The screenshots above are mostly the English UI; the dashboard also has a Chines
 
 ### What we injected and what it said
 
-Each fault was injected by hand on the lab devices and restored afterwards. Roughly what came out (results vary a little from run to run, because the investigation is done by an LLM):
+Each fault was injected by hand on the lab devices and restored afterwards. Typical outcomes are listed below; results vary between runs because the investigation is performed by an LLM.
 
 | Fault | What the system concluded |
 |---|---|
-| Interface shut down by hand | Shut down from the console; high confidence |
-| BGP neighbor shut down | One incident covering both ends: shut down on V1 |
-| OSPF hello / authentication / area mismatch, passive interface | Names the mismatch on the side that has it; the far side sometimes misses it |
-| Device `reload` | Reload; says honestly it cannot tell whether a person or a script did it |
+| Interface shut down manually | Shutdown from the console; high confidence |
+| BGP neighbor shut down | One incident covering both ends: shutdown configured on V1 |
+| Both ends of one link shut down in sequence | One incident naming both interfaces as the two ends of the same link |
+| OSPF hello / authentication / area mismatch, passive interface | One incident naming the mismatch; in earlier runs the far-side card occasionally missed it |
+| Device `reload` | Reload identified; whether a person or a script initiated it is reported as undetermined |
 | Interface flapping | Repeated shutdown / no shutdown from the console |
-| Fault that heals itself in 45 s | Reports the shutdown and that it has already recovered |
+| Fault that heals itself within 45 s | Shutdown reported, with the note that it has already recovered |
 | Two unrelated faults at once (an access port and a BGP neighbor) | Kept as separate incidents |
-| Whole device powered off | The neighbors conclude "the far device is unreachable" and say what could not be told apart |
+| Whole device powered off | Each neighbor concludes that the remote device is unreachable, with the undetermined points listed; the neighbor cards are not yet merged into one incident |
 
-It is a lab-validated, read-only assistant, not a production-tested product.
+Validated in a lab environment only (virtual Cisco topology); not tested in production.
 
-## Deploy
+## Deployment
 
-Three levels; each works without the next. Commands: [docs/INSTALL.md](docs/INSTALL.md). **Step-by-step Zabbix and NetBox setup, with diagrams: [docs/DEPLOY.md](docs/DEPLOY.md).**
+Three levels, each usable without the next. Commands: [docs/INSTALL.md](docs/INSTALL.md). **Step-by-step Zabbix and NetBox setup, with diagrams: [docs/DEPLOY.md](docs/DEPLOY.md).**
 
 <p align="center"><img src="docs/images/deployment.png" alt="deployment overview" width="1000"></p>
 
@@ -131,7 +124,7 @@ pip install -r requirements.txt                   # Python 3.13
 2. **Dashboard** — `cd web && npm ci && npm run build && cd ..`, then (optional) `python tools/seed_demo.py` to fill it with six synthetic incidents, then `python -m uvicorn netops_ai.api.app:app --host 127.0.0.1 --port 8000` and open http://127.0.0.1:8000.
 3. **Full pipeline** — `cp env.example .env` and fill in: Zabbix (read-only user), devices (**read-only account**), an LLM endpoint, optionally Feishu; list your devices in `topology.yaml`; in Zabbix add a webhook media type that posts to `/webhooks/zabbix`. What exactly to click in Zabbix and NetBox: [docs/DEPLOY.md](docs/DEPLOY.md).
 
-The API and dashboard have **no login**: keep uvicorn on `127.0.0.1` and put an authenticating reverse proxy in front (nginx example in [INSTALL.md](docs/INSTALL.md#securing-the-api-and-dashboard)).
+The API and dashboard have **no authentication**: bind uvicorn to `127.0.0.1` and place an authenticating reverse proxy in front (nginx example in [INSTALL.md](docs/INSTALL.md#securing-the-api-and-dashboard)).
 
 ## The environment it was built and tested on
 

@@ -96,8 +96,10 @@ export const dict = {
 
   "overview.kpi.incidents": { zh: "已自动分析的故障", en: "Incidents auto-analyzed" },
   "overview.kpi.incidents.fromPrefix": { zh: "来自 ", en: "from " },
+  "overview.kpi.incidents.alerts": { zh: "{n} 条告警", en: "{n} alerts" },
   "unit.times": { zh: "次", en: "" },
   "unit.devices": { zh: "台", en: "" },
+  "unit.seconds": { zh: "秒", en: "s" },
   "overview.kpi.human.suffix": { zh: "次判不出，如实转人工，不硬给结论", en: "unresolved — honestly escalated instead of a forced answer" },
   "overview.kpi.speed": { zh: "平均出结论耗时", en: "Avg. time to conclusion" },
   "overview.kpi.speed.sub": { zh: "从告警窗口关闭起算", en: "Measured from when the alert window closes" },

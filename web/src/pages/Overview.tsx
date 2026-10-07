@@ -62,8 +62,8 @@ export default function Overview() {
 
       {/* 挑最能说明价值的几个数：做了多少、多快、什么时候认怂、花了多少、有没有越界。最后一张是卖点，做大做绿。 */}
       <section className="grid grid-cols-[1fr_1fr_1fr_1.25fr] gap-4">
-        <Stat label={t("overview.kpi.incidents")} value={inc?.value ?? "—"} unit={t("unit.times")} sub={inc?.sub ? `${t("overview.kpi.incidents.fromPrefix")}${inc.sub}` : ""} tint="bg-indigo-500" />
-        <Stat label={t("overview.kpi.speed")} value={sp?.[1] ?? "—"} unit={sp?.[2] || "秒"} sub={t("overview.kpi.speed.sub")} tint="bg-sky-500" />
+        <Stat label={t("overview.kpi.incidents")} value={inc?.value ?? "—"} unit={t("unit.times")} sub={inc?.sub ? `${t("overview.kpi.incidents.fromPrefix")}${fill(t("overview.kpi.incidents.alerts"), { n: String(inc.sub).match(/\d+/)?.[0] ?? "" })}` : ""} tint="bg-indigo-500" />
+        <Stat label={t("overview.kpi.speed")} value={sp?.[1] ?? "—"} unit={sp?.[2] && sp[2] !== "秒" ? sp[2] : t("unit.seconds")} sub={t("overview.kpi.speed.sub")} tint="bg-sky-500" />
         <Stat label={t("overview.kpi.human")} value={human?.ratio != null ? Math.round(human.ratio * 100) : "—"} unit="%"
           sub={human ? `${human.value} ${t("overview.kpi.human.suffix")}` : ""} tint="bg-amber-500" />
         <div className="relative overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
