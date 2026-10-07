@@ -13,6 +13,13 @@ export const TOOL_LABEL_KEYS: Record<string, DictKey> = {
   nb_topology: "tool.nb_topology",
   topology_neighbors: "tool.topology_neighbors",
   doc_search: "tool.doc_search",
+  zbx_problems: "tool.zbx_problems",
+  zbx_syslog: "tool.zbx_syslog",
+  zbx_hosts: "tool.zbx_hosts",
+  run_inspection: "tool.run_inspection",
+  list_analyses: "tool.list_analyses",
+  get_analysis: "tool.get_analysis",
+  nb_devices: "tool.nb_devices",
 };
 
 /** `t` 是调用方组件顶层的 `useT()`——这俩不是 hook，可以在 `.map()` 循环里安全调用。
@@ -23,4 +30,6 @@ export const toolLabel = (t: (k: DictKey) => string, name: string) =>
   (TOOL_LABEL_KEYS[name] && t(TOOL_LABEL_KEYS[name])) || name || t("tool.fallback");
 
 export const stepLabel = (t: (k: DictKey) => string, step: { tool?: string; tool_label?: string }) =>
-  step.tool_label && step.tool_label !== step.tool ? step.tool_label : toolLabel(t, step.tool ?? "");
+  // 已登记的工具一律用前端字典，随界面语言切换；字典里没有的才用后端给的 tool_label
+  (step.tool && TOOL_LABEL_KEYS[step.tool]) ? toolLabel(t, step.tool)
+    : (step.tool_label && step.tool_label !== step.tool ? step.tool_label : toolLabel(t, step.tool ?? ""));

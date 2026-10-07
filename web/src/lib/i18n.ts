@@ -523,6 +523,13 @@ export const dict = {
   "tool.nb_topology": { zh: "查询网络拓扑", en: "Query network topology" },
   "tool.topology_neighbors": { zh: "查询邻居设备", en: "Query neighbor devices" },
   "tool.doc_search": { zh: "检索知识库文档", en: "Search knowledge base" },
+  "tool.zbx_problems": { zh: "查当前告警", en: "Check active alerts" },
+  "tool.zbx_syslog": { zh: "查设备日志", en: "Check device syslog" },
+  "tool.zbx_hosts": { zh: "列监控主机", en: "List monitored hosts" },
+  "tool.run_inspection": { zh: "读取或运行巡检", en: "Read or run inspection" },
+  "tool.list_analyses": { zh: "列历史研判", en: "List earlier conclusions" },
+  "tool.get_analysis": { zh: "读取历史研判", en: "Read an earlier conclusion" },
+  "tool.nb_devices": { zh: "查纳管设备", en: "Query managed devices" },
   "tool.fallback": { zh: "工具调用", en: "Tool call" },
 } as const;
 

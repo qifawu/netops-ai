@@ -113,7 +113,9 @@ def _load_dotenv(path: Path) -> dict:
 _OUTPUT_LANG_EN_NOTE = (
     "\n\nOUTPUT LANGUAGE: English. Write the conclusion, headline, evidence explanations, hypothesis "
     "notes, alert timeline text and every investigation-step note in English, even though these "
-    "instructions are written in Chinese. Quoted evidence stays verbatim (device output is not translated)."
+    "instructions are written in Chinese. Do not use any Chinese characters in your own words: write "
+    "'device', 'consequence', 'independent', 'unrelated' and so on in English. Quoted evidence stays "
+    "verbatim (device output is not translated)."
 )
 
 

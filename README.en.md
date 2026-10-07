@@ -16,7 +16,7 @@
 - **Topology.** From NetBox (optional, read-only, webhook refresh) or from a YAML file.
 - **Playbooks (SOP).** YAML advice for the agent, with a linter; six examples: interface down, OSPF adjacency, BGP session, device restart, high CPU, interface errors.
 - **Scheduled inspection.** Trend detectors on Zabbix history, live read-only status checks, history, diff against the previous run, Markdown/HTML export.
-- **Command audit.** Every command the agent ran and every command that was refused.
+- **Investigation trace and command audit.** Every step of an incident's investigation is recorded (tool, arguments, result); the audit page lists every command the agent ran and every command the whitelist refused.
 - **Dashboard.** Chinese and English: overview, incidents, topology, inspection, audit, settings. A demo mode masks IP addresses and IDs.
 - **Demo scripts.** `tools/demo_replay.py` and `tools/seed_demo.py` populate the dashboard without a lab.
 
@@ -44,7 +44,7 @@
 | `sop_lookup` | Find the matching playbook — it advises, it never executes |
 | `run_inspection`, `get_analysis` | Run an inspection, look up an earlier conclusion |
 
-**Command-line tools** we ship, all runnable offline unless noted:
+**Bundled command-line tools** (all runnable offline unless noted):
 
 | Command | What it is for |
 |---|---|
@@ -57,45 +57,43 @@
 
 ## What it looks like
 
-Everything below comes from real runs: a virtual Cisco lab (7 nodes, 3 layers), faults injected by hand on the devices, a real Zabbix, NetBox and LLM. No mock data. The dashboard's demo mode masks IP addresses.
+All screenshots below come from real runs: a virtual Cisco lab (7 nodes, 3 layers), faults injected by hand on the devices, and a real Zabbix, NetBox and LLM. They contain no mock data. The dashboard's demo mode is on, so IP addresses are masked.
 
-### A real fault, end to end
+### Example: BGP neighbor shutdown
 
 Fault injected: `neighbor 10.0.0.2 shutdown` on V1. Six alerts arrived from both ends of the session (SNMP traps, syslog, Zabbix triggers). They were merged into **one incident**, investigated with read-only tools, and delivered as one card and one dashboard page.
 
-**The card that lands in the chat** (rendered from the card JSON of that incident):
+**Feishu card** (rendered from the card JSON of that incident):
 
 <p align="center"><img src="docs/images/real-card.png" alt="Feishu card" width="640"></p>
 
-**The same incident on the dashboard** — conclusion, six pieces of quoted evidence, the alert timeline from both devices, the investigation steps, and the six-hypothesis checklist:
+**The same incident on the dashboard**: conclusion, six pieces of quoted evidence, the alert timeline from both devices, the investigation steps, and the six-hypothesis checklist:
 
 <p align="center"><img src="docs/images/real-incident-en.png" alt="Incident page" width="900"></p>
 
 ### The rest of the dashboard
 
-**Overview** — how many incidents were handled, how fast, how many were escalated to a human, how many commands the whitelist blocked:
+**Overview**: how many incidents were handled, how fast, how many were escalated to a human, how many commands the whitelist blocked:
 
 <p align="center"><img src="docs/images/real-overview-en.png" alt="Overview" width="900"></p>
 
-**Devices and topology** — layered topology read from NetBox, recent faults overlaid:
+**Devices and topology**: layered topology read from NetBox, recent faults overlaid:
 
 <p align="center"><img src="docs/images/real-topology-en.png" alt="Topology" width="900"></p>
 
-**Command audit** — every command the agent ran and every one the whitelist refused:
+**Command audit**: every command the agent ran and every one the whitelist refused:
 
 <p align="center"><img src="docs/images/real-audit-en.png" alt="Command audit" width="900"></p>
 
-**Automated inspection** — trend findings plus read-only status checks of every device (screenshot in the Chinese UI):
+**Automated inspection**: trend findings plus read-only status checks of every device:
 
 <p align="center"><img src="docs/images/ui-inspection.png" alt="Inspection" width="900"></p>
 
-The screenshots above are mostly the English UI; the dashboard also has a Chinese UI.
-
-### What we injected and what it said
+### Lab test cases
 
 Each fault was injected by hand on the lab devices and restored afterwards. Typical outcomes are listed below; results vary between runs because the investigation is performed by an LLM.
 
-| Fault | What the system concluded |
+| Injected fault | System conclusion |
 |---|---|
 | Interface shut down manually | Shutdown from the console; high confidence |
 | BGP neighbor shut down | One incident covering both ends: shutdown configured on V1 |
@@ -121,9 +119,9 @@ python -m venv .venv && . .venv/bin/activate     # Windows: .venv\Scripts\activa
 pip install -r requirements.txt                   # Python 3.13
 ```
 
-1. **Check the install** — `python -m pytest tests -q` (no devices, model or credentials needed).
-2. **Dashboard** — `cd web && npm ci && npm run build && cd ..`, then (optional) `python tools/seed_demo.py` to fill it with six synthetic incidents, then `python -m uvicorn netops_ai.api.app:app --host 127.0.0.1 --port 8000` and open http://127.0.0.1:8000.
-3. **Full pipeline** — `cp env.example .env` and fill in: Zabbix (read-only user), devices (**read-only account**), an LLM endpoint, optionally Feishu; list your devices in `topology.yaml`; in Zabbix add a webhook media type that posts to `/webhooks/zabbix`. What exactly to click in Zabbix and NetBox: [docs/DEPLOY.md](docs/DEPLOY.md).
+1. **Verify the installation** — `python -m pytest tests -q` (no devices, model or credentials needed).
+2. **Dashboard** — `cd web && npm ci && npm run build && cd ..`, then (optional) `python tools/seed_demo.py` to load six synthetic incidents, then `python -m uvicorn netops_ai.api.app:app --host 127.0.0.1 --port 8000` and open http://127.0.0.1:8000.
+3. **Full pipeline** — `cp env.example .env` and fill in: Zabbix (read-only user), devices (**read-only account**), an LLM endpoint, optionally Feishu; list your devices in `topology.yaml`; in Zabbix add a webhook media type that posts to `/webhooks/zabbix`. Step-by-step configuration of Zabbix and NetBox: [docs/DEPLOY.md](docs/DEPLOY.md).
 
 The API and dashboard have **no authentication**: bind uvicorn to `127.0.0.1` and place an authenticating reverse proxy in front (nginx example in [INSTALL.md](docs/INSTALL.md#securing-the-api-and-dashboard)).
 
@@ -138,7 +136,7 @@ Developed and tested on a virtual EVE-NG lab: 7 Cisco IOS nodes in three layers 
 Where the code is built to be extended:
 
 - **More vendors.** Each one is a command-whitelist ruleset, a command catalog and a few playbooks. Cisco IOS is the template.
-- **More playbooks.** Six ship today. A playbook is a small YAML file; [docs/PLAYBOOK-FORMAT.md](docs/PLAYBOOK-FORMAT.md) has a ten-minute guide.
+- **More playbooks.** Six are included. A playbook is a small YAML file; see [docs/PLAYBOOK-FORMAT.md](docs/PLAYBOOK-FORMAT.md) for the format.
 - **More notification channels** next to Feishu (chat webhooks, e-mail).
 - **Built-in authentication** for the dashboard and webhook, so a reverse proxy is optional.
 - **Richer inspection rules** and more status checks (STP, port-channel, power and fan).
