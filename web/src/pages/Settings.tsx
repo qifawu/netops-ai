@@ -4,6 +4,7 @@ import { Badge, Card, CardHead, Empty, Icon, Loading, PATH, SectionTitle } from 
 import { AiInline, AiText } from "../lib/aitext";
 import { call } from "../lib/sopui";
 import { fill, useT, type DictKey } from "../lib/i18n";
+import { maskText, useMask } from "../lib/mask";
 
 /** 系统设置页：把散落在 `.env` 里的连接配置 + 运行参数搬到网页上，可看可改。
  *
@@ -256,6 +257,8 @@ function FieldRow({ item, dirty, onChange }: { item: SettingItem; dirty: Record<
   const t = useT();
   const touched = item.key in dirty;
   const displayValue = touched ? dirty[item.key] : (item.value ?? "");
+  const masked = useMask();
+  const shown = masked ? maskText(displayValue) : displayValue;
   return (
     <div className="px-4 py-2.5">
       <div className="flex items-center gap-2">
@@ -271,7 +274,7 @@ function FieldRow({ item, dirty, onChange }: { item: SettingItem; dirty: Record<
             placeholder={item.configured ? t("settings.field.sensitivePlaceholderConfigured") : t("settings.field.sensitivePlaceholderUnset")}
             className="w-full rounded-[3px] border border-[#c3cad2] bg-white px-3 py-1.5 text-sm outline-none transition focus:border-brand focus:ring-1 focus:ring-brand/30" />
         ) : (
-          <input value={displayValue} onChange={(e) => onChange(item.key, e.target.value)}
+          <input value={shown} readOnly={masked} onChange={(e) => onChange(item.key, e.target.value)}
             className="w-full rounded-[3px] border border-[#c3cad2] bg-white px-3 py-1.5 text-sm outline-none transition focus:border-brand focus:ring-1 focus:ring-brand/30" />
         )}
       </div>
@@ -283,6 +286,8 @@ function RuntimeRow({ item, dirty, onChange }: { item: SettingItem; dirty: Recor
   const t = useT();
   const touched = item.key in dirty;
   const displayValue = touched ? dirty[item.key] : (item.value ?? "");
+  const masked = useMask();
+  const shown = masked ? maskText(displayValue) : displayValue;
   return (
     <div className="grid grid-cols-[1fr_auto] items-start gap-3 px-4 py-2.5">
       <div>
@@ -303,7 +308,7 @@ function RuntimeRow({ item, dirty, onChange }: { item: SettingItem; dirty: Recor
             <option value="off">off</option>
           </select>
         ) : (
-          <input type={item.numeric ? "number" : "text"} value={displayValue} onChange={(e) => onChange(item.key, e.target.value)}
+          <input type={item.numeric ? "number" : "text"} value={shown} readOnly={masked} onChange={(e) => onChange(item.key, e.target.value)}
             placeholder={item.numeric ? t("settings.field.numericPlaceholder") : ""}
             className="w-full rounded-[3px] border border-[#c3cad2] bg-white px-2 py-1.5 text-sm outline-none focus:border-brand focus:ring-1 focus:ring-brand/30" />
         )}

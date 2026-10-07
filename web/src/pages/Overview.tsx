@@ -92,7 +92,7 @@ export default function Overview() {
             const ft = faultType(i), c = confMeta(i.confidence);
             return (
               <button key={i.incident_id} onClick={() => goTab("incidents", i.incident_id)} title={i.root_cause}
-                className="grid w-full grid-cols-[92px_96px_128px_minmax(0,1fr)_88px_76px] items-center gap-3 border-b border-line px-4 py-2 text-left text-[13px] transition last:border-b-0 even:bg-[#fafbfc] hover:bg-brand/[0.05]">
+                className="grid w-full grid-cols-[92px_96px_128px_minmax(0,1fr)_88px_76px] min-h-[58px] items-center gap-3 border-b border-line px-4 py-2 text-left text-[13px] transition last:border-b-0 even:bg-[#fafbfc] hover:bg-brand/[0.05]">
                 <span className="num text-xs text-dim">{ts(i.clock)}</span>
                 <span className="num truncate text-xs font-medium text-slate-800">{i.host}</span>
                 <span><Badge className={ft.cls}>{t(ft.labelKey)}</Badge></span>
