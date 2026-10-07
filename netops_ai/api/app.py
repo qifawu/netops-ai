@@ -304,7 +304,7 @@ def api_advise_inspection(background_tasks: BackgroundTasks) -> JSONResponse:
             kept, _ignored = dashboard.split_ignored(latest, _insp_config.load_config())
         except _insp_config.ConfigError:
             kept = latest.get("findings") or []  # 配置文件坏了就别因此不出建议，按全部发现来
-        _advise.save(_advise.advise({**latest, "findings": kept}))
+        _advise.save(_advise.advise({**latest, "findings": kept}, status=dashboard.load_latest_status()))
 
     background_tasks.add_task(_run)
     return JSONResponse({"status": "started"})

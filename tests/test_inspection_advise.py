@@ -47,6 +47,27 @@ class TestCompact(unittest.TestCase):
         self.assertEqual(len(rows), advise.MAX_FINDINGS)
 
 
+class TestCompactStatus(unittest.TestCase):
+    STATUS = {"devices": [
+        {"name": "R1", "checks": [
+            {"check": "ospf", "status": "bad", "summary": "1 个 OSPF 邻居不是 FULL", "evidence": ["10.0.0.2  INIT/  -"]},
+            {"check": "bgp", "status": "ok", "summary": "全部 Established", "evidence": []},
+        ]},
+        {"name": "R2", "checks": [{"check": "errors", "status": "warn", "summary": "没有上一次基线", "evidence": []}]},
+    ]}
+
+    def test_只带bad和warn_设备输出原样保留(self):
+        text = advise.compact_status(self.STATUS)
+        self.assertIn("R1 · 状态检查（ospf）", text)
+        self.assertIn("设备输出：10.0.0.2  INIT/  -", text)
+        self.assertIn("R2 · 状态检查（errors）", text)
+        self.assertNotIn("bgp", text)
+
+    def test_没有状态巡检就是空串(self):
+        self.assertEqual(advise.compact_status(None), "")
+        self.assertEqual(advise.compact_status({"devices": []}), "")
+
+
 class TestThinkingSwitch(unittest.TestCase):
     """百炼思考模型要关思考，**收在 `LLMClient` 里统一做**，不靠各调用方记得。
 

@@ -20,6 +20,24 @@ ADVICE_PATH = REPO_ROOT / "records" / "inspection-advice.json"
 MAX_FINDINGS = 40
 
 
+def compact_status(status: dict | None) -> str:
+    """状态巡检里 bad/warn 的检查，压成可逐字引用的文本；ok/skip 不进（没事的不占注意力）。
+
+    `item_key` 一栏用检查名（interfaces/ospf/bgp/errors/reachable），host 用设备名，跟趋势发现同一套回指。
+    """
+    rows = []
+    for dev in (status or {}).get("devices") or []:
+        for c in dev.get("checks") or []:
+            if c.get("status") not in ("bad", "warn"):
+                continue
+            evidence = " / ".join(c.get("evidence") or [])
+            rows.append(
+                f"[S{len(rows)}] {dev.get('name', '')} · 状态检查（{c.get('check', '')}） | {c['status']} | {c.get('summary', '')}"
+                + (f" | 设备输出：{evidence}" if evidence else "")
+            )
+    return "\n".join(rows)
+
+
 def compact(payload: dict) -> str:
     """把 findings 压成可逐字引用的文本。直接用检测器写好的 `reason`，数字不重排。"""
     lines = [
@@ -144,13 +162,28 @@ PROMPT = """你在看一份只读网络巡检的结果。这些项**都还没触
 ## 巡检原文
 
 {findings}
+
+## 状态巡检（登设备只读检查，规则判定；只列 bad/warn）
+
+这部分是**当前就不对**的状态，不是趋势：bad 通常意味着已经有东西坏了，优先级高于趋势。
+没有列出的设备/检查就是正常。`host` 填设备名，`item_key` 填括号里的检查名。
+
+{status}
 """
 
 
-def advise(payload: dict, *, topology: str | None = None) -> dict:
-    """出一份带处置建议的巡检报告。**引文核不过会被标出来，不静默通过。**"""
+def advise(payload: dict, *, topology: str | None = None, status: dict | None = None) -> dict:
+    """出一份带处置建议的巡检报告。**引文核不过会被标出来，不静默通过。**
+
+    `status` 是最近一份状态巡检快照；传了就把 bad/warn 的检查一起喂进去，引文也能回指到设备输出。
+    """
+    status_text = compact_status(status)
     findings_text = compact(payload)
-    prompt = PROMPT.format(topology=topology if topology is not None else topology_hint(), findings=findings_text)
+    prompt = PROMPT.format(
+        topology=topology if topology is not None else topology_hint(),
+        findings=findings_text,
+        status=status_text or "（没有状态巡检结果，或全部正常）",
+    )
     cfg = env()
     # **超时要比告警侧长。** 告警侧一次只看一条告警，这里是几十条发现一次过，
     # 输入 6k 上下、还要它分三堆，实测默认 60 秒不够（qwen3.8-flash 带 reasoning）。
@@ -173,7 +206,7 @@ def advise(payload: dict, *, topology: str | None = None) -> dict:
     verdicts = verify_evidence(
         [{"claim": a.get("why", ""), "source": a.get("evidence", ""), "source_from": "zabbix"}
          for a in parsed.get("needs_attention") or []],
-        findings_text,
+        findings_text + "\n" + status_text,
         None,
     )
     for item, v in zip(parsed.get("needs_attention") or [], verdicts):
@@ -183,6 +216,7 @@ def advise(payload: dict, *, topology: str | None = None) -> dict:
     parsed["verification"] = summarize(verdicts)
     parsed["findings_fed"] = min(len(payload.get("findings") or []), MAX_FINDINGS)
     parsed["findings_total"] = len(payload.get("findings") or [])
+    parsed["status_fed"] = status_text.count("\n") + 1 if status_text else 0
     return parsed
 
 
