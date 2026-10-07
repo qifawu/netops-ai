@@ -6,7 +6,7 @@
 
 [部署](docs/INSTALL.zh-CN.md) · [接入 Zabbix 和 NetBox](docs/DEPLOY.zh-CN.md) · [实验环境](docs/LAB.zh-CN.md) · [架构](docs/ARCHITECTURE.zh-CN.md) · [剧本](docs/PLAYBOOK-FORMAT.zh-CN.md) · [贡献](CONTRIBUTING.zh-CN.md)
 
-<p align="center"><img src="docs/images/architecture.png" alt="architecture" width="1000"></p>
+<p align="center"><img src="docs/images/architecture.zh-CN.png" alt="architecture" width="1000"></p>
 
 ## 功能
 
@@ -26,7 +26,7 @@
 - **取证。** 一个工具调用循环：设有 token 预算、调用次数上限、重复调用拦截和无进展终止。剧本（YAML）只向 agent 提供建议，不执行任何操作。
 - **两层只读守卫。** 第一层是代码：每条设备命令发出前先经过白名单检查；第二层是在设备上创建的只读账号。Zabbix 客户端同样设有方法白名单。
 
-<p align="center"><img src="docs/images/guard.png" alt="两层只读守卫" width="900"></p>
+<p align="center"><img src="docs/images/guard.zh-CN.png" alt="两层只读守卫" width="900"></p>
 
 - **结论。** 模型按严格的结构输出。对六类假设（本端操作、本机硬件或资源、对端或上游、链路质量、管理面、监控采集自身问题）逐项给出：支持、已排除（须附反证）或无法判定；无法判定时须写明缺少哪些数据、用哪条命令可以确定。
 
@@ -112,7 +112,7 @@
 
 三个层级，互不依赖。命令见 [docs/INSTALL.zh-CN.md](docs/INSTALL.zh-CN.md)；**Zabbix 和 NetBox 逐步配置（带图）见 [docs/DEPLOY.zh-CN.md](docs/DEPLOY.zh-CN.md)。**
 
-<p align="center"><img src="docs/images/deployment.png" alt="部署总览" width="1000"></p>
+<p align="center"><img src="docs/images/deployment.zh-CN.png" alt="部署总览" width="1000"></p>
 
 ```bash
 git clone https://github.com/qifawu/netops-ai.git && cd netops-ai
@@ -128,7 +128,7 @@ pip install -r requirements.txt                   # Python 3.13
 
 ## 实验环境
 
-<p align="center"><img src="docs/images/lab-topology.png" alt="参考实验环境" width="1000"></p>
+<p align="center"><img src="docs/images/lab-topology.zh-CN.png" alt="参考实验环境" width="1000"></p>
 
 在 EVE-NG 虚拟实验环境中开发和测试：三层共 7 台 Cisco IOS 节点，运行 OSPF 和 BGP，由 Zabbix 7.0 监控；故障在设备上手工注入。仅支持 Cisco IOS，未经生产环境测试；仓库不含设备镜像和配置。详情见 [docs/LAB.zh-CN.md](docs/LAB.zh-CN.md)。
 

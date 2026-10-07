@@ -6,7 +6,7 @@
 
 ## 先看图
 
-<p align="center"><img src="images/deployment.png" alt="部署总览" width="1000"></p>
+<p align="center"><img src="images/deployment.zh-CN.png" alt="部署总览" width="1000"></p>
 
 netops-ai 对外只做**读**：读 Zabbix（箭头 2）、读设备（3）、读 NetBox（4）。进来的两条线是 webhook：Zabbix → `/webhooks/zabbix`（1，必需）；NetBox → `/webhooks/netbox`（8，可选，只为让拓扑刷新更快）。
 
@@ -25,7 +25,7 @@ netops-ai 对外只做**读**：读 Zabbix（箭头 2）、读设备（3）、�
 
 用 Zabbix 7.0 测过。下面的菜单名是 7.0 的，其它版本大同小异。
 
-<p align="center"><img src="images/zabbix-setup.png" alt="Zabbix 要配的五件事" width="1000"></p>
+<p align="center"><img src="images/zabbix-setup.zh-CN.png" alt="Zabbix 要配的五件事" width="1000"></p>
 
 ### 1. 给 netops-ai 一个只读用户
 
@@ -106,7 +106,7 @@ curl -X POST http://<netops-ai-host>:8000/webhooks/zabbix \
 
 不接 NetBox 时，拓扑来自 `topology.yaml`。接了 NetBox，设备和链路就从 NetBox 读，`topology.yaml` 留作兜底。
 
-<p align="center"><img src="images/netbox-setup.png" alt="netops-ai 读取的 NetBox 字段" width="1000"></p>
+<p align="center"><img src="images/netbox-setup.zh-CN.png" alt="netops-ai 读取的 NetBox 字段" width="1000"></p>
 
 ### 1. 在 NetBox 里填什么
 
