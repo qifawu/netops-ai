@@ -46,13 +46,8 @@ const ICON: Record<string, string> = {
   settings: "M12 3v3m0 12v3m9-9h-3M6 12H3m14.5-6.5-2 2m-9 9-2 2m0-13 2 2m9 9 2 2M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z",
 };
 
-/** 图标按信息类型上色，不是为了花。告警是红的、AI 是紫的、知识是绿的，
- *  侧边栏扫一眼就知道哪几项是"出事了要看的"。类名写全，v4 靠扫源码生成。 */
-const TINT: Record<string, string> = {
-  overview: "text-indigo-500", incidents: "text-rose-500", chat: "text-violet-500",
-  playbooks: "text-emerald-500", knowledge: "text-teal-500", inspection: "text-sky-500",
-  topology: "text-amber-500", audit: "text-slate-400", cost: "text-emerald-500", users: "text-violet-500", settings: "text-slate-500",
-};
+/** 侧边栏图标统一单色线条，不再按类型上色：彩色图标是装饰，
+ *  真正"出事了要看"的信号由页面里的状态色（红 / 橙 / 绿）承担。 */
 
 const NAV: { groupKey: DictKey; items: Item[] }[] = [
   { groupKey: "nav.group.home", items: [{ key: "overview", labelKey: "nav.overview", descKey: "nav.overview.desc", page: Overview }] },
@@ -108,27 +103,30 @@ function Shell() {
 
   return (
     <div className="flex min-h-screen">
-      <aside className="w-56 shrink-0 border-r border-line bg-card">
-        <div className="px-4 py-5">
-          <div className="text-lg font-bold tracking-tight text-brand">netops-ai</div>
-          <div className="mt-0.5 text-xs text-dim">{t("app.tagline")}</div>
-          {/* 只读是这套东西最该被一眼看到的约束，做成常驻徽标而不是角落小字。 */}
-          <div className="mt-3 rounded-lg bg-gradient-to-r from-brand to-violet-500 px-3 py-2 text-center text-xs font-semibold text-white shadow-sm">
-            {t("app.readonlyBadge")}
+      <aside className="w-52 shrink-0 bg-nav text-slate-300">
+        <div className="sticky top-0 flex h-screen flex-col overflow-y-auto">
+        <div className="flex h-[52px] items-center gap-2 border-b border-white/10 px-4">
+          <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] shrink-0 text-[#6fb3cf]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 3v5M6 21v-5m12 5v-5M4 16h4v5H4v-5Zm12 0h4v5h-4v-5ZM10 8h4v5h-4V8Z" />
+          </svg>
+          <div className="min-w-0 leading-tight">
+            <div className="font-mono text-[14px] font-semibold tracking-tight text-white">netops-ai</div>
+            <div className="line-clamp-2 text-[10.5px] leading-[13px] text-slate-400">{t("app.tagline")}</div>
           </div>
         </div>
+        <nav className="flex-1 py-2">
         {nav.map((g) => (
-          <div key={g.groupKey} className="px-3 pb-2">
-            <div className="px-2 py-1.5 text-xs text-dim">{t(g.groupKey)}</div>
+          <div key={g.groupKey} className="pb-1">
+            <div className="px-4 pt-3 pb-1 text-[10.5px] font-semibold tracking-wider text-slate-500 uppercase">{t(g.groupKey)}</div>
             {g.items.map((n) => (
               <button key={n.key} onClick={() => { setTab(n.key); location.hash = n.key; }}
-                className={cn("relative mb-0.5 flex w-full items-center gap-2.5 rounded-lg py-2 pr-3 pl-3.5 text-left text-sm transition",
+                className={cn("relative flex h-8 w-full items-center gap-2.5 px-4 text-left text-[13px] transition-colors",
                   tab === n.key
-                    ? "bg-gradient-to-r from-brand/12 to-transparent font-semibold text-brand"
-                    : "text-slate-600 hover:bg-slate-100")}>
-                {tab === n.key && <span className="absolute top-1.5 bottom-1.5 left-0 w-[3px] rounded-full bg-brand" />}
-                <svg viewBox="0 0 24 24" className={cn("h-4 w-4 shrink-0", TINT[n.key] ?? "text-slate-400")}
-                     fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                    ? "bg-white/[0.08] font-medium text-white"
+                    : "text-slate-300 hover:bg-white/[0.04] hover:text-white")}>
+                {tab === n.key && <span className="absolute inset-y-0 left-0 w-[3px] bg-[#4ba3c7]" />}
+                <svg viewBox="0 0 24 24" className={cn("h-4 w-4 shrink-0", tab === n.key ? "text-[#8cc4dc]" : "text-slate-400")}
+                     fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
                   <path d={ICON[n.key] ?? ICON.overview} />
                 </svg>
                 {t(n.labelKey)}
@@ -136,48 +134,57 @@ function Shell() {
             ))}
           </div>
         ))}
+        </nav>
+        {/* **状态点必须是真探出来的。** 常亮的绿点第一次出事的时候还是绿的，
+            那比没有更坏——所以这几颗各对应 `/api/status` 里一次真实判断。
+            label 经 `statusLabel()` 按形状翻译；`note`（hover 提示）是任务执行结果拼的
+            自由文本，原样显示不翻。放在侧边栏底部常驻，像网管软件的状态栏，不挤顶栏。 */}
+        {status && status.items.length > 0 && (
+          <div className="space-y-1 border-t border-white/10 px-4 py-3">
+            {status.items.map((x) => (
+              <div key={x.key} title={x.note || ""} className="flex items-start gap-2 text-[11px] leading-[15px] text-slate-400">
+                <span className={cn("mt-[4px] inline-block h-[7px] w-[7px] shrink-0 rounded-full", x.ok ? "bg-[#3fb95f]" : "bg-[#e0902a]")} />
+                <span className="min-w-0">{statusLabel(t, x.key, x.label)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        </div>
       </aside>
 
       <div className="min-w-0 flex-1">
-        <div className="h-1 bg-gradient-to-r from-brand via-violet-500 to-sky-400" />
-        <header className="flex items-center justify-between border-b border-line bg-card px-7 py-3">
-          <div>
-            <div className="text-lg font-semibold tracking-tight text-slate-900">{t(cur.labelKey)}</div>
-            <div className="text-xs text-dim">{t(cur.descKey)}</div>
+        <header className="sticky top-0 z-20 flex h-[52px] items-center justify-between gap-4 border-b border-line bg-card px-6">
+          <div className="min-w-0 flex-1 leading-tight">
+            <div className="text-[15px] font-semibold text-slate-900">{t(cur.labelKey)}</div>
+            <div className="line-clamp-1 text-[11.5px] text-dim" title={t(cur.descKey)}>{t(cur.descKey)}</div>
           </div>
-          <div className="flex items-center gap-2">
-            {/* **状态点必须是真探出来的。** 常亮的绿点第一次出事的时候还是绿的，
-                那比没有更坏——所以这几颗各对应 `/api/status` 里一次真实判断。
-                label 经 `statusLabel()` 按形状翻译；`note`（hover 提示）是任务执行结果拼的
-                自由文本，原样显示不翻。 */}
-            {status?.items.map((x) => (
-              <span key={x.key} title={x.note || ""}
-                className={cn("flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs",
-                  x.ok ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn")}>
-                <span className={cn("inline-block h-1.5 w-1.5 rounded-full", x.ok ? "bg-ok" : "bg-warn")} />
-                {statusLabel(t, x.key, x.label)}
-              </span>
-            ))}
+          <div className="flex shrink-0 items-center gap-1.5">
+            {/* 只读是这套东西最该被一眼看到的约束：顶栏常驻一个小标签，不再做成彩色大按钮。 */}
+            <span title={t("app.readonlyBadge")}
+              className="flex items-center gap-1.5 rounded-[2px] border border-brand/40 bg-brand/[0.06] px-2 py-[3px] text-[11px] font-semibold tracking-wide whitespace-nowrap text-brand">
+              <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 11V8a6 6 0 1 1 12 0v3M5 11h14v10H5V11Z" /></svg>
+              {t("app.readonlyBadge")}
+            </span>
             <button onClick={() => setLang(lang === "zh" ? "en" : "zh")} title="Switch language / 切换语言"
-              className="flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-xs font-medium text-slate-500 transition hover:bg-slate-50">
+              className="rounded-[2px] border border-line px-2 py-[3px] text-[11px] font-medium whitespace-nowrap text-slate-600 transition hover:border-slate-400 hover:text-slate-900">
               {lang === "zh" ? "EN" : "中文"}
             </button>
             <button onClick={() => setMask(!mask)} title={t("app.demoMode.title")}
-              className={cn("flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition",
-                mask ? "border-brand/30 bg-brand/10 text-brand" : "border-line text-slate-500 hover:bg-slate-50")}>
-              {t("app.demoMode")}
-              <span className={cn("relative inline-block h-4 w-7 rounded-full transition", mask ? "bg-brand" : "bg-slate-300")}>
-                <span className={cn("absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all", mask ? "left-3.5" : "left-0.5")} />
+              className={cn("flex items-center gap-1.5 rounded-[2px] border px-2 py-[3px] text-[11px] font-medium whitespace-nowrap transition",
+                mask ? "border-brand/50 text-brand" : "border-line text-slate-600 hover:border-slate-400")}>
+              <span className={cn("relative inline-block h-3 w-5 rounded-[2px] transition", mask ? "bg-brand" : "bg-slate-300")}>
+                <span className={cn("absolute top-[2px] h-2 w-2 rounded-[1px] bg-white transition-all", mask ? "left-[10px]" : "left-[2px]")} />
               </span>
+              {t("app.demoMode")}
             </button>
-            <div className="ml-2 text-right leading-tight">
-              <div className="text-lg font-semibold tabular-nums text-brand">{clock}</div>
-              <div className="text-[11px] text-dim tabular-nums">{today}</div>
+            <div className="ml-2 border-l border-line pl-3 text-right leading-tight">
+              <div className="num text-[13px] font-semibold text-slate-800">{clock}</div>
+              <div className="num text-[10.5px] text-dim">{today}</div>
             </div>
             <UserMenu />
           </div>
         </header>
-        <main className="p-6"><Boundary key={tab} crashedText={t("app.pageCrashed")}><Page /></Boundary></main>
+        <main className="p-5"><Boundary key={tab} crashedText={t("app.pageCrashed")}><Page /></Boundary></main>
       </div>
     </div>
   );
@@ -206,7 +213,7 @@ class Boundary extends Component<{ children: ReactNode; crashedText: string }, {
   render() {
     if (!this.state.err) return this.props.children;
     return (
-      <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+      <div className="rounded-[4px] border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
         <div className="font-medium">{this.props.crashedText}</div>
         <pre className="mt-2 whitespace-pre-wrap font-mono text-xs">{String(this.state.err)}</pre>
       </div>

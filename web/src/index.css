@@ -1,37 +1,121 @@
 @import "tailwindcss";
 
-/* **颜色按信息类型分工，不是按好看分。** 一个界面只有一种蓝的时候，
-   告警、证据、待审、正常长得一模一样，扫一眼分不出轻重。
-   下面七个语义色各自绑定一类信息，页面里不许拿它们当装饰用。 */
+/* **网管控制台的配色：中性冷灰底 + 一个主色，颜色只表达状态。**
+   以前那套紫蓝渐变、彩色图标、大圆角粉彩卡片一眼就是"AI 生成的界面"，
+   而且颜色拿去做装饰之后，真正的红/橙/绿反而不显眼了。
+   现在的规矩：
+   - brand（深青蓝）只用在：当前选中、主按钮、链接、焦点。不做大面积底色。
+   - ok / warn / bad 只表达语义（正常 / 警告待审 / 故障），不拿来区分类别。
+   - 分类标签（故障类型、来源）一律中性灰框，靠文字区分。 */
 @theme {
-  --color-page: #f4f6fb;
+  --color-page: #eceff2;
   --color-card: #ffffff;
-  --color-line: #e4e9f2;
-  --color-ink: #0f172a;
-  --color-dim: #64748b;
-  --color-brand: #4f46e5;   /* AI / 智能体 */
-  --color-ok: #059669;      /* 正常 · 高置信 */
-  --color-warn: #d97706;    /* 待审 · 需人工 */
-  --color-bad: #e11d48;     /* 故障 · 低置信 */
-  --color-term: #0b1220;    /* 终端 / 原始回显 */
+  --color-line: #d5dbe1;
+  --color-ink: #1a222b;
+  --color-dim: #5b6672;
+  --color-brand: #0f5c7a;   /* 主色：深青蓝。选中 / 主按钮 / 链接 */
+  --color-ok: #23803d;      /* 正常 · 高置信 */
+  --color-warn: #b8650a;    /* 警告 · 待审 · 需人工 */
+  --color-bad: #c42b2b;     /* 故障 · 低置信 */
+  --color-term: #161b21;    /* 终端 / 原始回显 */
+  --color-nav: #1d252e;     /* 侧边栏 */
+
+  /* 圆角统一压小：卡片 4px，控件 3px，标签 2px。 */
+  --radius-xs: 1px;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 3px;
+  --radius-xl: 4px;
+  --radius-2xl: 4px;
+  --radius-3xl: 6px;
+  --radius-4xl: 6px;
+
+  /* 去掉漂浮感：阴影只留给弹出层，且很轻。 */
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow-md: 0 2px 6px rgb(16 24 32 / 0.10);
+  --shadow-lg: 0 4px 12px rgb(16 24 32 / 0.14);
+  --shadow-xl: 0 6px 18px rgb(16 24 32 / 0.16);
+
+  --font-mono: "Cascadia Mono", "JetBrains Mono", Consolas, ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* **兜底：把装饰性色系（紫 / 靛 / 天蓝 / 青 / 粉）统一折成主色同色相的钢蓝阶。**
+     公开页面已逐个改成中性 / 语义色，但会员页面和后续新代码里难免还有
+     `bg-violet-50` 这类写法——这里让它们最多呈现为低饱和的钢蓝，不再是五颜六色。 */
+  --color-steel-50: #eef3f6;
+  --color-steel-100: #dde7ed;
+  --color-steel-200: #bfd0db;
+  --color-steel-300: #93b0c2;
+  --color-steel-400: #6290a8;
+  --color-steel-500: #3d728f;
+  --color-steel-600: #22607f;
+  --color-steel-700: #194d67;
+  --color-steel-800: #143f54;
+  --color-steel-900: #103345;
+  --color-steel-950: #0a2230;
+
+  --color-indigo-50: #eef3f6;  --color-indigo-100: #dde7ed; --color-indigo-200: #bfd0db; --color-indigo-300: #93b0c2;
+  --color-indigo-400: #6290a8; --color-indigo-500: #3d728f; --color-indigo-600: #22607f; --color-indigo-700: #194d67;
+  --color-indigo-800: #143f54; --color-indigo-900: #103345; --color-indigo-950: #0a2230;
+  --color-violet-50: #eef3f6;  --color-violet-100: #dde7ed; --color-violet-200: #bfd0db; --color-violet-300: #93b0c2;
+  --color-violet-400: #6290a8; --color-violet-500: #3d728f; --color-violet-600: #22607f; --color-violet-700: #194d67;
+  --color-violet-800: #143f54; --color-violet-900: #103345; --color-violet-950: #0a2230;
+  --color-purple-50: #eef3f6;  --color-purple-100: #dde7ed; --color-purple-200: #bfd0db; --color-purple-300: #93b0c2;
+  --color-purple-400: #6290a8; --color-purple-500: #3d728f; --color-purple-600: #22607f; --color-purple-700: #194d67;
+  --color-purple-800: #143f54; --color-purple-900: #103345; --color-purple-950: #0a2230;
+  --color-fuchsia-50: #eef3f6;  --color-fuchsia-100: #dde7ed; --color-fuchsia-200: #bfd0db; --color-fuchsia-300: #93b0c2;
+  --color-fuchsia-400: #6290a8; --color-fuchsia-500: #3d728f; --color-fuchsia-600: #22607f; --color-fuchsia-700: #194d67;
+  --color-fuchsia-800: #143f54; --color-fuchsia-900: #103345; --color-fuchsia-950: #0a2230;
+  --color-sky-50: #eef3f6;  --color-sky-100: #dde7ed; --color-sky-200: #bfd0db; --color-sky-300: #93b0c2;
+  --color-sky-400: #6290a8; --color-sky-500: #3d728f; --color-sky-600: #22607f; --color-sky-700: #194d67;
+  --color-sky-800: #143f54; --color-sky-900: #103345; --color-sky-950: #0a2230;
+  --color-blue-50: #eef3f6;  --color-blue-100: #dde7ed; --color-blue-200: #bfd0db; --color-blue-300: #93b0c2;
+  --color-blue-400: #6290a8; --color-blue-500: #3d728f; --color-blue-600: #22607f; --color-blue-700: #194d67;
+  --color-blue-800: #143f54; --color-blue-900: #103345; --color-blue-950: #0a2230;
+  --color-cyan-50: #eef3f6;  --color-cyan-100: #dde7ed; --color-cyan-200: #bfd0db; --color-cyan-300: #93b0c2;
+  --color-cyan-400: #6290a8; --color-cyan-500: #3d728f; --color-cyan-600: #22607f; --color-cyan-700: #194d67;
+  --color-cyan-800: #143f54; --color-cyan-900: #103345; --color-cyan-950: #0a2230;
+  --color-teal-50: #eef3f6;  --color-teal-100: #dde7ed; --color-teal-200: #bfd0db; --color-teal-300: #93b0c2;
+  --color-teal-400: #6290a8; --color-teal-500: #3d728f; --color-teal-600: #22607f; --color-teal-700: #194d67;
+  --color-teal-800: #143f54; --color-teal-900: #103345; --color-teal-950: #0a2230;
+  --color-pink-50: #eef3f6;  --color-pink-100: #dde7ed; --color-pink-200: #bfd0db; --color-pink-300: #93b0c2;
+  --color-pink-400: #6290a8; --color-pink-500: #3d728f; --color-pink-600: #22607f; --color-pink-700: #194d67;
+  --color-pink-800: #143f54; --color-pink-900: #103345; --color-pink-950: #0a2230;
+
+  /* 语义色也压一点饱和度：rose/red 统一成故障红，emerald/green 统一成运行绿，
+     amber/orange 统一成告警橙。浅底（50/100）保持很淡，只做标签底。 */
+  --color-rose-50: #fbefef;  --color-rose-100: #f6dcdc; --color-rose-200: #ebbcbc; --color-rose-300: #dc9393;
+  --color-rose-400: #d06363; --color-rose-500: #c42b2b; --color-rose-600: #ad2424; --color-rose-700: #921f1f;
+  --color-rose-800: #761b1b; --color-rose-900: #5e1616;
+  --color-emerald-50: #edf6ef;  --color-emerald-100: #d8ecdd; --color-emerald-200: #b3d8bc; --color-emerald-300: #86bf94;
+  --color-emerald-400: #4fa262; --color-emerald-500: #23803d; --color-emerald-600: #1d6f34; --color-emerald-700: #185c2b;
+  --color-emerald-800: #144a23; --color-emerald-900: #103c1d;
+  --color-amber-50: #fbf3e8;  --color-amber-100: #f6e5cc; --color-amber-200: #ebcc9f; --color-amber-300: #dcab66;
+  --color-amber-400: #cc8a33; --color-amber-500: #b8650a; --color-amber-600: #a05708; --color-amber-700: #864907;
+  --color-amber-800: #6c3b06; --color-amber-900: #573005;
 }
+
 html {
-  font-family: "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 body { background: var(--color-page); color: var(--color-ink); }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
-::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-.card-shadow { box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 4px 16px -8px rgba(15,23,42,.08); }
-@keyframes pulse-dot { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.8); } }
+::-webkit-scrollbar-thumb { background: #b9c1c9; border-radius: 0; }
+::-webkit-scrollbar-thumb:hover { background: #8e98a3; }
+/* 旧类名保留（会员页还在用），但不再有投影。 */
+.card-shadow { box-shadow: none; }
+/* 数字：等宽字体 + 等宽数字，KPI / 时间 / 计数一律用它，列对齐、跳动时不晃。 */
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+@keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 .pulse-dot { animation: pulse-dot 1.2s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .pulse-dot { animation: none; } }
 
 /* 原始回显一律用这个：深底等宽，跟浅色主区拉开层次，一眼知道"这是设备吐出来的原文"。 */
 .term {
   background: var(--color-term);
-  color: #cbd5e1;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #c9d1d9;
+  font-family: var(--font-mono);
+  border-left: 2px solid #3a4652;
 }
 .term ::selection { background: #334155; }

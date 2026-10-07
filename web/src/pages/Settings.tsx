@@ -65,7 +65,7 @@ const RUNTIME_GROUPS: { key: string; titleKey: DictKey; noteKey?: DictKey }[] = 
 
 const SOURCE_LABEL: Record<SourceKind, { textKey: DictKey; tone: string }> = {
   dotenv: { textKey: "settings.source.dotenv", tone: "bg-slate-100 text-slate-600 ring-slate-200" },
-  os_environ: { textKey: "settings.source.osEnviron", tone: "bg-sky-50 text-sky-700 ring-sky-200" },
+  os_environ: { textKey: "settings.source.osEnviron", tone: "bg-white text-slate-600 ring-slate-300" },
   env_override: { textKey: "settings.source.envOverride", tone: "bg-amber-50 text-amber-700 ring-amber-200" },
   unset: { textKey: "settings.source.unset", tone: "bg-slate-50 text-slate-400 ring-slate-200" },
 };
@@ -130,13 +130,13 @@ export default function Settings() {
   if (!data) return <Loading />;
 
   return (
-    <div className="mx-auto max-w-[1180px] space-y-7 pb-24">
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-3.5 text-sm text-amber-800">
+    <div className="mx-auto max-w-[1280px] space-y-5 pb-20">
+      <div className="rounded-[3px] border border-amber-200 border-l-2 border-l-amber-500 bg-amber-50 px-4 py-2.5 text-[13px] text-amber-900">
         <b>{t("settings.banner")}</b>{t("settings.bannerSep")}{t("settings.bannerSuffix")}
       </div>
 
       {toast && (
-        <div className={cn("rounded-xl px-4 py-2.5 text-sm ring-1", toastTone === "ok" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-rose-50 text-rose-700 ring-rose-200")}>
+        <div className={cn("rounded-[3px] px-4 py-2 text-sm ring-1", toastTone === "ok" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-rose-50 text-rose-700 ring-rose-200")}>
           {toast}
         </div>
       )}
@@ -172,13 +172,13 @@ export default function Settings() {
         </div>
       </section>
 
-      <div className="fixed inset-x-0 bottom-0 z-10 border-t border-line bg-white/95 px-7 py-3 backdrop-blur">
-        <div className="mx-auto flex max-w-[1180px] items-center gap-3">
+      <div className="fixed right-0 bottom-0 left-52 z-10 border-t border-line bg-white px-6 py-2.5">
+        <div className="mx-auto flex max-w-[1280px] items-center gap-3">
           <span className="text-xs text-dim">
             {Object.keys(dirty).length === 0 ? t("settings.noUnsaved") : fill(t("settings.unsavedTemplate"), { n: Object.keys(dirty).length })}
           </span>
           <button onClick={save} disabled={saving || Object.keys(dirty).length === 0}
-            className="ml-auto rounded-lg bg-brand px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40">
+            className="ml-auto rounded-[3px] bg-brand px-4 py-1.5 text-[13px] font-medium text-white transition hover:bg-[#0b4a63] disabled:cursor-not-allowed disabled:opacity-40">
             {saving ? t("settings.saving") : t("settings.save")}
           </button>
         </div>
@@ -204,11 +204,11 @@ function ConnCard({ title, icon, items, dirty, onChange, testTarget, testResult,
   const configuredCount = items.filter((x) => (x.sensitive ? x.configured : !!x.value)).length;
   return (
     <Card className="overflow-hidden">
-      <CardHead title={title} icon={<Icon d={icon} className="text-brand" />}
+      <CardHead title={title} icon={<Icon d={icon} className="text-slate-500" />}
         note={feishu ? fill(t("settings.configuredRatioTemplate"), { done: configuredCount, total: items.length }) : undefined}
         right={onTest && (
           <button onClick={onTest} disabled={testResult?.busy}
-            className="rounded-lg border border-line bg-white px-3 py-1.5 text-xs font-medium text-brand transition hover:bg-brand/5 disabled:opacity-50">
+            className="rounded-[3px] border border-[#c3cad2] bg-white px-2 py-[3px] text-xs font-medium text-slate-700 transition hover:border-brand hover:text-brand disabled:opacity-50">
             {testResult?.busy ? t("settings.testing") : t("settings.testConnection")}
           </button>
         )} />
@@ -223,16 +223,16 @@ function ConnCard({ title, icon, items, dirty, onChange, testTarget, testResult,
         </div>
       )}
       {llmRoute && llmRoute.configured && (
-        <div className="mx-5 mt-3 rounded-lg bg-indigo-50 px-3 py-2 text-xs text-indigo-900 ring-1 ring-indigo-100">
+        <div className="mx-5 mt-3 rounded-[3px] border border-line border-l-2 border-l-brand bg-slate-50 px-3 py-2 text-xs text-slate-800">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="font-medium">{t("settings.llmRoute.vendorLabel")}{llmRoute.vendor_label}</span>
-            <span className="text-indigo-400">·</span>
+            <span className="text-slate-400">·</span>
             <span>{t("settings.llmRoute.modelLabel")} {llmRoute.model}</span>
             {llmRoute.route_transport && (
-              <Badge className="bg-white text-indigo-600 ring-indigo-200">{llmRoute.route_transport}</Badge>
+              <Badge className="bg-white text-slate-600 ring-slate-300">{llmRoute.route_transport}</Badge>
             )}
           </div>
-          <div className="mt-1 text-indigo-700">
+          <div className="mt-1 text-slate-600">
             {fill(t("settings.llmRoute.noBackup"), { note: llmRoute.note })}
           </div>
           {llmRoute.route_warnings && llmRoute.route_warnings.length > 0 && (
@@ -241,7 +241,7 @@ function ConnCard({ title, icon, items, dirty, onChange, testTarget, testResult,
         </div>
       )}
       {llmRoute && !llmRoute.configured && (
-        <div className="mx-5 mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-dim ring-1 ring-slate-100">
+        <div className="mx-5 mt-3 rounded-[3px] bg-slate-50 px-3 py-2 text-xs text-dim ring-1 ring-slate-100">
           {t("settings.llmRoute.notConfigured")}
         </div>
       )}
@@ -257,10 +257,10 @@ function FieldRow({ item, dirty, onChange }: { item: SettingItem; dirty: Record<
   const touched = item.key in dirty;
   const displayValue = touched ? dirty[item.key] : (item.value ?? "");
   return (
-    <div className="px-5 py-3">
+    <div className="px-4 py-2.5">
       <div className="flex items-center gap-2">
         <span className="text-sm font-medium text-slate-700"><AiText text={item.label} lowPriority /></span>
-        <code className="text-[11px] text-dim">{item.key}</code>
+        <code className="font-mono text-[11px] text-dim">{item.key}</code>
         {item.sensitive && !item.configured && <Badge className="bg-slate-50 text-slate-400 ring-slate-200">{t("settings.field.notConfigured")}</Badge>}
         {touched && <Badge className="bg-brand/10 text-brand ring-brand/20">{t("settings.field.pendingSave")}</Badge>}
       </div>
@@ -269,10 +269,10 @@ function FieldRow({ item, dirty, onChange }: { item: SettingItem; dirty: Record<
         {item.sensitive ? (
           <input type="password" value={displayValue} onChange={(e) => onChange(item.key, e.target.value)}
             placeholder={item.configured ? t("settings.field.sensitivePlaceholderConfigured") : t("settings.field.sensitivePlaceholderUnset")}
-            className="w-full rounded-lg border border-line bg-white px-3 py-1.5 text-sm outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15" />
+            className="w-full rounded-[3px] border border-[#c3cad2] bg-white px-3 py-1.5 text-sm outline-none transition focus:border-brand focus:ring-1 focus:ring-brand/30" />
         ) : (
           <input value={displayValue} onChange={(e) => onChange(item.key, e.target.value)}
-            className="w-full rounded-lg border border-line bg-white px-3 py-1.5 text-sm outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15" />
+            className="w-full rounded-[3px] border border-[#c3cad2] bg-white px-3 py-1.5 text-sm outline-none transition focus:border-brand focus:ring-1 focus:ring-brand/30" />
         )}
       </div>
     </div>
@@ -284,11 +284,11 @@ function RuntimeRow({ item, dirty, onChange }: { item: SettingItem; dirty: Recor
   const touched = item.key in dirty;
   const displayValue = touched ? dirty[item.key] : (item.value ?? "");
   return (
-    <div className="grid grid-cols-[1fr_auto] items-start gap-3 px-5 py-3">
+    <div className="grid grid-cols-[1fr_auto] items-start gap-3 px-4 py-2.5">
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium text-slate-700"><AiText text={item.label} lowPriority /></span>
-          <code className="text-[11px] text-dim">{item.key}</code>
+          <code className="font-mono text-[11px] text-dim">{item.key}</code>
           <SourceBadge source={item.source} />
           {touched && <Badge className="bg-brand/10 text-brand ring-brand/20">{t("settings.field.pendingSave")}</Badge>}
         </div>
@@ -297,7 +297,7 @@ function RuntimeRow({ item, dirty, onChange }: { item: SettingItem; dirty: Recor
       <div className="w-40 shrink-0">
         {item.switch ? (
           <select value={displayValue} onChange={(e) => onChange(item.key, e.target.value)}
-            className="w-full rounded-lg border border-line bg-white px-2 py-1.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/15">
+            className="w-full rounded-[3px] border border-[#c3cad2] bg-white px-2 py-1.5 text-sm outline-none focus:border-brand focus:ring-1 focus:ring-brand/30">
             <option value="">{t("settings.field.useCodeDefault")}</option>
             <option value="on">on</option>
             <option value="off">off</option>
@@ -305,7 +305,7 @@ function RuntimeRow({ item, dirty, onChange }: { item: SettingItem; dirty: Recor
         ) : (
           <input type={item.numeric ? "number" : "text"} value={displayValue} onChange={(e) => onChange(item.key, e.target.value)}
             placeholder={item.numeric ? t("settings.field.numericPlaceholder") : ""}
-            className="w-full rounded-lg border border-line bg-white px-2 py-1.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/15" />
+            className="w-full rounded-[3px] border border-[#c3cad2] bg-white px-2 py-1.5 text-sm outline-none focus:border-brand focus:ring-1 focus:ring-brand/30" />
         )}
       </div>
     </div>

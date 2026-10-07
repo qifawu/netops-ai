@@ -37,8 +37,8 @@ const TONE: Record<string, string> = {
   持续走坏: "bg-rose-50 text-rose-700 ring-rose-200",
   持续好转: "bg-emerald-50 text-emerald-700 ring-emerald-200",
   反复抖动又自愈: "bg-amber-50 text-amber-700 ring-amber-200",
-  周期性冲高: "bg-sky-50 text-sky-700 ring-sky-200",
-  持续单向变化: "bg-violet-50 text-violet-700 ring-violet-200",
+  周期性冲高: "bg-white text-slate-700 ring-slate-300",
+  持续单向变化: "bg-white text-slate-700 ring-slate-300",
 };
 /** 后端 `inspection/report.py` 的 `_HINT` 是个固定 5 项的枚举，不是 AI 自由生成文本，
  *  可以像 `ROLE_KEY` 那样整词翻译；万一后端加了新枚举值，前端没收录就原样透传。 */
@@ -50,7 +50,8 @@ const TONE_KEY: Record<string, { label: DictKey; why: DictKey }> = {
   持续单向变化: { label: "inspection.tone.oneWay.label", why: "inspection.tone.oneWay.why" },
 };
 const STATE_TONE: Record<string, string> = {
-  ok: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  // 正常是常态，不该满屏绿：白底灰框 + 绿字，异常（橙 / 红）才用实底跳出来。
+  ok: "bg-white text-emerald-700 ring-slate-300",
   warn: "bg-amber-50 text-amber-700 ring-amber-200",
   bad: "bg-rose-50 text-rose-700 ring-rose-200",
   skip: "bg-slate-100 text-slate-500 ring-slate-200",
@@ -118,9 +119,9 @@ export default function Inspection() {
   const diff = d.diff;
   const hasDiff = !!(diff?.status || diff?.trend);
   return (
-    <div className="mx-auto max-w-[1180px] space-y-5">
+    <div className="mx-auto max-w-[1280px] space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <p className="min-w-0 flex-1 text-sm leading-relaxed text-slate-600">{t("inspection.intro")}</p>
+        <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-slate-600">{t("inspection.intro")}</p>
         <Btn tone="brand" busy={running} disabled={running} onClick={rerun}>{running ? t("inspection.running") : t("inspection.run")}</Btn>
         <a href="/api/inspection/export?format=md" download data-testid="export-md"><Btn>{t("inspection.export.md")}</Btn></a>
         <a href="/api/inspection/export?format=html" download data-testid="export-html"><Btn>{t("inspection.export.html")}</Btn></a>
@@ -129,42 +130,41 @@ export default function Inspection() {
         {st?.checked_at && <span>{fill(t("inspection.status.checkedAt"), { at: st.checked_at })}</span>}
         {d.scanned_at && <span>{fill(t("inspection.how.lastRun"), { at: d.scanned_at })}</span>}
       </div>
-      {note && <div className="rounded-xl bg-emerald-50 px-4 py-2.5 text-sm text-emerald-700 ring-1 ring-emerald-200">{note}</div>}
+      {note && <div className="rounded-[3px] bg-emerald-50 px-4 py-2.5 text-sm text-emerald-700 ring-1 ring-emerald-200">{note}</div>}
 
-      <div className="grid grid-cols-4 gap-4" data-testid="inspection-kpis">
+      <div className="grid grid-cols-4 divide-x divide-line rounded-[4px] border border-line bg-card" data-testid="inspection-kpis">
         {(st ? [
-          [t("inspection.status.kpi.bad"), st.summary.bad, t("inspection.status.unit.check"), "bg-rose-500"],
-          [t("inspection.status.kpi.warn"), st.summary.warn, t("inspection.status.unit.check"), "bg-amber-500"],
-          [t("inspection.status.kpi.unreachable"), st.summary.unreachable, t("unit.devices"), "bg-slate-500"],
-          [t("inspection.kpi.findings"), d.finding_count, t("inspection.unit.finding"), "bg-violet-500"],
+          [t("inspection.status.kpi.bad"), st.summary.bad, t("inspection.status.unit.check"), st.summary.bad ? "text-bad" : ""],
+          [t("inspection.status.kpi.warn"), st.summary.warn, t("inspection.status.unit.check"), st.summary.warn ? "text-warn" : ""],
+          [t("inspection.status.kpi.unreachable"), st.summary.unreachable, t("unit.devices"), st.summary.unreachable ? "text-bad" : ""],
+          [t("inspection.kpi.findings"), d.finding_count, t("inspection.unit.finding"), ""],
         ] : [
-          [t("inspection.kpi.scannedHosts"), d.scanned_hosts, t("unit.devices"), "bg-indigo-500"],
-          [t("inspection.kpi.scannedItems"), d.scanned_items.toLocaleString(), t("inspection.unit.item"), "bg-sky-500"],
-          [t("inspection.kpi.itemsWithData"), d.items_with_data.toLocaleString(), t("inspection.unit.item"), "bg-violet-500"],
-          [t("inspection.kpi.findings"), d.finding_count, t("inspection.unit.finding"), "bg-amber-500"],
+          [t("inspection.kpi.scannedHosts"), d.scanned_hosts, t("unit.devices"), ""],
+          [t("inspection.kpi.scannedItems"), d.scanned_items.toLocaleString(), t("inspection.unit.item"), ""],
+          [t("inspection.kpi.itemsWithData"), d.items_with_data.toLocaleString(), t("inspection.unit.item"), ""],
+          [t("inspection.kpi.findings"), d.finding_count, t("inspection.unit.finding"), ""],
         ]).map(([label, v, unit, tint]) => (
-          <div key={label as string} className="card-shadow relative overflow-hidden rounded-2xl border border-line bg-card p-5">
-            <span className={cn("absolute inset-x-0 top-0 h-1", tint as string)} />
-            <div className="text-[13px] font-medium text-slate-500">{label}</div>
+          <div key={label as string} className="px-4 py-3">
+            <div className="text-xs font-medium text-slate-600">{label}</div>
             <div className="mt-1.5 flex items-baseline gap-1.5">
-              <span className="text-[32px] leading-none font-semibold tracking-tight tabular-nums">{v}</span>
-              <span className="text-sm text-slate-500">{unit}</span>
+              <span className={cn("num text-[26px] leading-none font-semibold text-slate-900", tint as string)}>{v}</span>
+              <span className="text-xs text-dim">{unit}</span>
             </div>
           </div>
         ))}
       </div>
 
       <div data-testid="status-checks"><Card>
-        <CardHead title={t("inspection.status.title")} note={t("inspection.status.note")} icon={<Icon d={PATH.spark} className="text-emerald-500" />} />
+        <CardHead title={t("inspection.status.title")} note={t("inspection.status.note")} icon={<Icon d={PATH.spark} className="text-slate-500" />} />
         {devices.length === 0 ? <Empty title={t("inspection.status.empty")} /> : (
           <div className="divide-y divide-line">
             {devices.map((dev) => {
               const bad = dev.checks.filter((c) => c.status === "bad" || c.status === "warn");
               return (
                 <div key={dev.name}>
-                  <button onClick={() => setDevOpen(devOpen === dev.name ? "" : dev.name)} className="flex w-full flex-wrap items-center gap-3 px-5 py-3 text-left transition hover:bg-slate-50/70">
-                    <span className="w-14 text-sm font-semibold text-slate-800">{dev.name}</span>
-                    {dev.role && <Badge className="bg-slate-100 text-slate-600 ring-slate-200">{dev.role}</Badge>}
+                  <button onClick={() => setDevOpen(devOpen === dev.name ? "" : dev.name)} className="flex w-full flex-wrap items-center gap-3 px-4 py-2 text-left transition hover:bg-slate-50">
+                    <span className="num w-16 text-[13px] font-semibold text-slate-800">{dev.name}</span>
+                    {dev.role && <Badge className="bg-white text-slate-600 ring-slate-300">{dev.role}</Badge>}
                     <span className="flex min-w-0 flex-1 flex-wrap gap-1.5">
                       {dev.checks.map((c) => (
                         <Badge key={c.check} className={STATE_TONE[c.status]} title={c.summary}>{CHECK_KEY[c.check] ? t(CHECK_KEY[c.check]) : c.check} · {t(STATE_KEY[c.status])}</Badge>
@@ -186,7 +186,7 @@ export default function Inspection() {
                             <>
                               <div className="mt-1 text-xs text-dim">{fill(t("inspection.status.evidence"), { cmd: c.command })}</div>
                               {/* 设备输出原话，不翻译、不改写 */}
-                              <div className="term mt-1 overflow-x-auto rounded-lg px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre">{c.evidence.join("\n")}</div>
+                              <div className="term mt-1 overflow-x-auto rounded-[2px] px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre">{c.evidence.join("\n")}</div>
                             </>
                           )}
                         </div>
@@ -226,12 +226,12 @@ export default function Inspection() {
 
       {d.advice && (
         <Card>
-          <CardHead title={t("inspection.advice.title")} note={fill(t("inspection.advice.noteTemplate"), { total: d.advice.findings_total, fed: d.advice.findings_fed })} icon={<Icon d={PATH.spark} className="text-violet-500" />} />
+          <CardHead title={t("inspection.advice.title")} note={fill(t("inspection.advice.noteTemplate"), { total: d.advice.findings_total, fed: d.advice.findings_fed })} icon={<Icon d={PATH.spark} className="text-slate-500" />} />
           <div className="px-5 py-4">
             <p className="text-sm leading-7 text-slate-700"><AiInline text={d.advice.summary} /></p>
             <div className="mt-4 space-y-3">
               {d.advice.needs_attention.map((a, i) => (
-                <div key={i} className="rounded-xl border border-line p-4">
+                <div key={i} className="rounded-[3px] border border-line p-3.5">
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     <Badge className={isHigh(a.severity) ? "bg-rose-50 text-rose-700 ring-rose-200" : "bg-amber-50 text-amber-700 ring-amber-200"}>
                       {isHigh(a.severity) ? t("inspection.advice.high") : t("inspection.advice.watch")}
@@ -240,11 +240,11 @@ export default function Inspection() {
                     <code className="text-dim">{a.item_key}</code>
                   </div>
                   <div className="mt-2 text-sm leading-relaxed text-slate-700"><AiInline text={a.why} /></div>
-                  <div className="mt-2 rounded-lg bg-indigo-50 px-3 py-2 text-sm leading-relaxed text-indigo-800">
+                  <div className="mt-2 border-l-2 border-brand bg-slate-50 px-3 py-2 text-sm leading-relaxed text-slate-800">
                     <span className="font-semibold">{t("inspection.advice.suggestionLabel")}</span><AiInline text={a.suggestion} />
                   </div>
                   {/* evidence 是 schema 强制要求「从巡检原文逐字抄」的一句话，绝不能翻译——翻了就不再是可核查的原始证据 */}
-                  <div className="term mt-2 overflow-x-auto rounded-lg px-3 py-2 text-xs leading-relaxed">{a.evidence}</div>
+                  <div className="term mt-2 overflow-x-auto rounded-[2px] px-3 py-2 text-xs leading-relaxed">{a.evidence}</div>
                 </div>
               ))}
             </div>
@@ -257,19 +257,19 @@ export default function Inspection() {
       )}
 
       <div>
-        <div className="mb-3 flex items-center gap-3">
-          <h2 className="text-[15px] font-semibold text-slate-800">{t("inspection.groups.title")}</h2>
+        <div className="mb-2 flex items-center gap-2">
+          <h2 className="text-[13px] font-semibold tracking-wide text-slate-800">{t("inspection.groups.title")}</h2>
           <span className="ml-auto text-xs text-dim">{t("inspection.groupBy")}</span>
           {(["kind", "host"] as const).map((k) => (
             <Btn key={k} small tone={groupBy === k ? "brand" : "plain"} onClick={() => { setGroupBy(k); setOpen(""); }}>{t(k === "kind" ? "inspection.groupBy.kind" : "inspection.groupBy.host")}</Btn>
           ))}
         </div>
         {groups.length === 0 ? <Card><Empty title={t("inspection.groups.empty.title")} hint={t("inspection.groups.empty.hint")} /></Card> : (
-          <div className="space-y-3">
+          <div className="space-y-2">
             {groups.map((g) => (
               <Card key={g.label} className="overflow-hidden">
                 <button onClick={() => setOpen(open === g.label ? "" : g.label)}
-                  className="flex w-full items-center gap-3 px-5 py-3.5 text-left transition hover:bg-slate-50/70">
+                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-slate-50">
                   <Badge className={TONE[g.label] ?? "bg-slate-100 text-slate-600 ring-slate-200"}>{TONE_KEY[g.label] ? t(TONE_KEY[g.label].label) : g.label} · {g.rows.length}</Badge>
                   <span className="min-w-0 flex-1 truncate text-[13px] text-dim">{TONE_KEY[g.label] ? t(TONE_KEY[g.label].why) : g.why}</span>
                   <Icon d={PATH.chevron} className={cn("h-4 w-4 text-slate-400 transition", open === g.label && "rotate-90")} />
@@ -294,7 +294,7 @@ export default function Inspection() {
                               </>
                             ) : <div className="text-xs text-dim">{t("inspection.rule.none")}</div>}
                           </div>
-                          <div className="shrink-0 text-indigo-600" data-testid="finding-spark"><Spark series={r.series} /></div>
+                          <div className="shrink-0 text-brand" data-testid="finding-spark"><Spark series={r.series} /></div>
                           <Btn small onClick={() => ignore(r)} title={t("inspection.ignore.title")}>{t("inspection.ignore.btn")}</Btn>
                         </div>
                       </div>
@@ -329,7 +329,7 @@ export default function Inspection() {
           <div className="divide-y divide-line">
             {d.history!.slice(0, 10).map((r, i) => (
               <div key={i} className="flex items-center gap-3 px-5 py-2 text-sm">
-                <Badge className={r.kind === "status" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-violet-50 text-violet-700 ring-violet-200"}>{t(r.kind === "status" ? "inspection.history.kind.status" : "inspection.history.kind.trend")}</Badge>
+                <Badge className="w-[84px] justify-center bg-white text-slate-700 ring-slate-300">{t(r.kind === "status" ? "inspection.history.kind.status" : "inspection.history.kind.trend")}</Badge>
                 <span className="font-mono text-xs text-slate-500">{r.at}</span>
                 <span className="text-slate-700">{r.note}</span>
               </div>
@@ -338,12 +338,12 @@ export default function Inspection() {
         )}
       </Card></div>
 
-      <details data-testid="inspection-params" className="rounded-2xl border border-line bg-card">
-        <summary className="cursor-pointer select-none px-5 py-3.5 text-[15px] font-semibold text-slate-800">
+      <details data-testid="inspection-params" className="rounded-[4px] border border-line bg-card">
+        <summary className="cursor-pointer select-none bg-[#f6f7f9] px-4 py-2.5 text-[13px] font-semibold tracking-wide text-slate-800">
           {t("inspection.params.title")} <span className="ml-2 text-xs font-normal text-dim">{t("inspection.params.note")}</span>
         </summary>
         <div className="space-y-4 border-t border-line p-5">
-          <div data-testid="inspection-how" className="rounded-xl border border-indigo-100 bg-indigo-50/50 px-5 py-4 text-[13px] leading-relaxed text-slate-700">
+          <div data-testid="inspection-how" className="rounded-[3px] border border-line border-l-2 border-l-brand bg-slate-50 px-4 py-3 text-[13px] leading-relaxed text-slate-700">
             <div className="mb-1 font-semibold text-slate-800">{t("inspection.how.title")}</div>
             <p>{t("inspection.how.body")}</p>
           </div>
@@ -352,7 +352,7 @@ export default function Inspection() {
       </details>
 
       {d.errors?.length > 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
+        <div className="rounded-[3px] border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
           {fill(t("inspection.errorsTemplate"), { n: d.errors.length })}
         </div>
       )}

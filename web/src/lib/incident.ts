@@ -20,21 +20,24 @@ export const confLevel = (c?: string) => ({ high: 3, medium: 2, low: 1 } as Reco
 /** 故障类型：按告警名 + 结论关键词粗分。顺序有讲究——
  *  接口 down 会连带引发 OSPF / BGP 邻居掉线，所以有接口告警时先归接口。
  *  正则匹配的是告警名原文（英文/厂商日志关键词，跟界面语言无关），不用翻译。 */
+/** 故障类型是**分类**不是状态，不上色：统一中性灰框标签，靠文字区分。
+ *  红 / 橙 / 绿只留给置信度和状态，不然满屏彩色标签反而看不出哪条是真出事。 */
+const TAG = "bg-white text-slate-700 ring-slate-300";
 const TYPES: { labelKey: DictKey; cls: string; test: RegExp }[] = [
-  { labelKey: "faultType.restart", cls: "bg-amber-50 text-amber-700 ring-amber-200", test: /restarted|coldStart|warmStart|重启/i },
-  { labelKey: "faultType.interfaceDown", cls: "bg-rose-50 text-rose-700 ring-rose-200", test: /link down|linkDown|line protocol|lower speed|Interface/i },
-  { labelKey: "faultType.bgp", cls: "bg-violet-50 text-violet-700 ring-violet-200", test: /BGP/i },
-  { labelKey: "faultType.ospf", cls: "bg-sky-50 text-sky-700 ring-sky-200", test: /OSPF/i },
-  { labelKey: "faultType.unreachable", cls: "bg-orange-50 text-orange-700 ring-orange-200", test: /ICMP|unreachable|不可达/i },
-  { labelKey: "faultType.monitoringDown", cls: "bg-slate-100 text-slate-600 ring-slate-200", test: /No SNMP|SNMP/i },
-  { labelKey: "faultType.configChange", cls: "bg-indigo-50 text-indigo-700 ring-indigo-200", test: /configChange|config/i },
+  { labelKey: "faultType.restart", cls: TAG, test: /restarted|coldStart|warmStart|重启/i },
+  { labelKey: "faultType.interfaceDown", cls: TAG, test: /link down|linkDown|line protocol|lower speed|Interface/i },
+  { labelKey: "faultType.bgp", cls: TAG, test: /BGP/i },
+  { labelKey: "faultType.ospf", cls: TAG, test: /OSPF/i },
+  { labelKey: "faultType.unreachable", cls: TAG, test: /ICMP|unreachable|不可达/i },
+  { labelKey: "faultType.monitoringDown", cls: TAG, test: /No SNMP|SNMP/i },
+  { labelKey: "faultType.configChange", cls: TAG, test: /configChange|config/i },
 ];
 export function faultType(i: IncLike): { labelKey: DictKey; cls: string } {
   const names = (i.alerts ?? []).map((a) => a.name ?? "").join(" | ");
   for (const t of TYPES) if (t.test.test(names)) return t;
   const rc = i.root_cause ?? "";
   for (const t of TYPES) if (t.test.test(rc)) return t;
-  return { labelKey: "faultType.other", cls: "bg-slate-100 text-slate-600 ring-slate-200" };
+  return { labelKey: "faultType.other", cls: TAG };
 }
 
 /** 一句话结论：优先用模型给的 headline（≤20 字定性），旧记录没有就取根因的第一句、太长在逗号处截断。
