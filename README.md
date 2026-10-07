@@ -126,11 +126,11 @@ pip install -r requirements.txt                   # Python 3.13
 
 The API and dashboard have **no authentication**: bind uvicorn to `127.0.0.1` and place an authenticating reverse proxy in front (nginx example in [INSTALL.md](docs/INSTALL.md#securing-the-api-and-dashboard)).
 
-## The environment it was built and tested on
+## Lab environment
 
 <p align="center"><img src="docs/images/lab-topology.png" alt="the reference lab" width="1000"></p>
 
-A virtual network in EVE-NG: 7 Cisco nodes in three layers (2 core and 2 aggregation IOSv, 3 access IOSv-L2), running OSPF and a BGP session, one Zabbix 7.0 server polling over SNMP and receiving traps. Faults were injected by hand on the devices (interface shutdown, OSPF neighbor loss, BGP session shutdown, reload) and the agent was checked against them. Cisco IOS only; not run in production. No device images or configs are included. Details and how to rebuild it: [docs/LAB.md](docs/LAB.md).
+Developed and tested on a virtual EVE-NG lab: 7 Cisco IOS nodes in three layers running OSPF and BGP, monitored by Zabbix 7.0. Faults were injected by hand on the devices. Cisco IOS only; not tested in production. Device images and configs are not included. Details: [docs/LAB.md](docs/LAB.md).
 
 ## Extension points
 
