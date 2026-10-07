@@ -110,6 +110,20 @@ def _load_dotenv(path: Path) -> dict:
     return env
 
 
+_OUTPUT_LANG_EN_NOTE = (
+    "\n\nOUTPUT LANGUAGE: English. Write the conclusion, headline, evidence explanations, hypothesis "
+    "notes, alert timeline text and every investigation-step note in English, even though these "
+    "instructions are written in Chinese. Quoted evidence stays verbatim (device output is not translated)."
+)
+
+
+def _localize_prompt(prompt: str) -> str:
+    """OUTPUT_LANG=en 时让取证/收尾两次调用都用英文输出；默认（zh）原样返回。"""
+    if str(_env().get("OUTPUT_LANG", "zh")).strip().lower() not in ("en", "english"):
+        return prompt
+    return prompt.replace("- 最终用中文回答，清楚写出证据和不确定性。", "- Answer in English; state the evidence and the uncertainty clearly.") + _OUTPUT_LANG_EN_NOTE
+
+
 def _env() -> dict:
     return {**_load_dotenv(REPO_ROOT / ".env"), **os.environ}
 
@@ -896,10 +910,10 @@ def _run_ai_exploration(
         host_filter=host_filter,
         plan=plan,
         final_schema=analysis_json_schema(),
-        system_prompt=ALERT_FORENSICS_SYSTEM_PROMPT,
+        system_prompt=_localize_prompt(ALERT_FORENSICS_SYSTEM_PROMPT),
         # 收尾那次调用要带研判的那套硬规则（逐字引文、alert_roles、grouping、
         # 六个方向的假设清单），不能用 agent_loop 里那句通用的。
-        final_system_prompt=ANALYSIS_SYSTEM_PROMPT,
+        final_system_prompt=_localize_prompt(ANALYSIS_SYSTEM_PROMPT),
         final_context=_analysis_context(fault_time_epoch),
         sop_data=sop_data,
         # **先暂时取消轮数限制，只留 LangGraph 自己的 recursion_limit**（负责人

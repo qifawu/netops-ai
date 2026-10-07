@@ -1316,3 +1316,16 @@ class TestCrossDeviceWindowMerge(unittest.TestCase):
         self.assertIn("T2-peer", text)
         self.assertNotIn("T3-same", text)
         self.assertEqual(pipeline._other_host_alert_text([a1, a3]), "")
+
+
+class TestOutputLanguage(unittest.TestCase):
+    def test_default_prompt_is_unchanged(self):
+        with mock.patch.object(pipeline, "_env", return_value={}):
+            self.assertEqual(pipeline._localize_prompt(pipeline.ALERT_FORENSICS_SYSTEM_PROMPT), pipeline.ALERT_FORENSICS_SYSTEM_PROMPT)
+
+    def test_en_replaces_the_chinese_answer_rule_and_appends_note(self):
+        with mock.patch.object(pipeline, "_env", return_value={"OUTPUT_LANG": "en"}):
+            out = pipeline._localize_prompt(pipeline.ALERT_FORENSICS_SYSTEM_PROMPT)
+        self.assertNotIn("- 最终用中文回答", out)
+        self.assertIn("Answer in English", out)
+        self.assertIn("OUTPUT LANGUAGE: English", out)
