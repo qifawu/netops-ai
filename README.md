@@ -29,6 +29,7 @@
 <p align="center"><img src="docs/images/guard.png" alt="two-layer read-only guard" width="900"></p>
 
 - **Conclude.** The model fills a strict schema. For each of six hypothesis families (local action, local hardware/resource, remote/upstream, link/path quality, management plane, monitoring artifact) it must report supported, ruled out (with counter-evidence) or undetermined. An undetermined result must state which data and which command would settle it.
+- **Inspect (before anything alerts).** Two checks, both decided by fixed rules rather than the model. *Trend inspection* reads only Zabbix history and runs three detectors: a sustained one-way trend (e.g. error counters climbing), a periodic spike, and a self-healing flap. *Status inspection* logs into each device read-only and checks interface up/up, OSPF neighbors all FULL, BGP sessions Established, and error-counter growth since the last run. Every finding quotes the device's own output. An optional model call then sorts findings into "handle tonight / ignore (with reason) / can't tell". Each run is stored so the page shows what is new or gone, and reports export to Markdown/HTML. Thresholds and scope live in `inspection.yaml`.
 
 ## Tools
 
