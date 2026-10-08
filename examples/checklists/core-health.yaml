@@ -1,0 +1,29 @@
+# Example inspection checklist: read-only commands, what the output must look like, numbers to track.
+# Hosts below are documentation addresses (RFC 5737); replace them with your devices.
+name: core-health
+vendor: cisco
+devices:
+  - {name: D1, host: 192.0.2.10}
+checks:
+  - id: interfaces
+    command: show ip interface brief
+    expect:
+      - {type: not_contains, value: administratively down, severity: warning}
+      - {type: regex, value: 'GigabitEthernet0/0\s+\S+\s+YES\s+\S+\s+up\s+up', severity: critical}
+  - id: ospf
+    command: show ip ospf neighbor
+    expect:
+      - {type: contains, value: FULL, severity: critical}
+      - {type: not_regex, value: '\b(INIT|2WAY|EXSTART|EXCHANGE|LOADING)\b', severity: warning}
+  - id: errors-gi0-1
+    command: show interfaces GigabitEthernet0/1
+    expect:
+      - {type: regex, value: 'line protocol is up', severity: critical}
+    extract:
+      - {name: input_errors, regex: '(\d+) input errors', cast: int}
+      - {name: crc, regex: '(\d+) CRC', cast: int}
+      - {name: output_errors, regex: '(\d+) output errors', cast: int}
+  - id: cpu
+    command: show processes cpu
+    extract:
+      - {name: cpu_5s_percent, regex: 'CPU utilization for five seconds: (\d+)%', cast: int}
