@@ -3,7 +3,7 @@ import { cn } from "./api";
 
 /** SOP 编辑相关页面共用的小件：请求封装、按钮、提示条、diff 展示。 */
 
-export async function call<T>(method: "GET" | "POST" | "PUT" | "DELETE", url: string, body?: unknown): Promise<{ ok: boolean; status: number; data: T & { message?: string } }> {
+export async function call<T>(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", url: string, body?: unknown): Promise<{ ok: boolean; status: number; data: T & { message?: string } }> {
   try {
     const r = await fetch(url, { method, headers: body ? { "content-type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
     const data = await r.json().catch(() => ({}));

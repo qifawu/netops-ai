@@ -66,7 +66,8 @@ class TestValidate(unittest.TestCase):
 
     def test_example_file_is_valid(self):
         root = Path(__file__).resolve().parents[1]
-        data = cl.load_checklist(root / "examples" / "checklists" / "core-health.yaml")
+        base = root / "examples" if (root / "examples" / "checklists").exists() else root / "open" / "examples"
+        data = cl.load_checklist(base / "checklists" / "core-health.yaml")
         self.assertEqual(cl.validate_checklist(data), [])
 
 

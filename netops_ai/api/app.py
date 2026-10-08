@@ -88,10 +88,17 @@ def zabbix_webhook(payload: ZabbixWebhookPayload, background_tasks: BackgroundTa
     return {"status": "accepted", "eventid": payload.eventid}
 
 
+from netops_ai.api.kb import router as _kb_router  # noqa: E402
+
+app.include_router(_kb_router)  # 知识库页面：只读概览 + 检索试验台
 
 from netops_ai.api.settings import router as _settings_router  # noqa: E402
 
 app.include_router(_settings_router)  # 系统设置页：连接配置 + 运行参数，读写 .env
+
+from netops_ai.api.plans import router as _plans_router  # noqa: E402
+
+app.include_router(_plans_router)  # 巡检计划：对话制定 / 保存 / 启停 / 立即运行 / 历史 / 趋势
 
 
 @app.get("/api")

@@ -6,6 +6,7 @@ import { fill, useT, type DictKey } from "../lib/i18n";
 import { Btn, call } from "../lib/sopui";
 import Spark from "../lib/Spark";
 import InspectionConfigForm, { type InspectionConfig } from "./InspectionConfigForm";
+import InspectionPlans from "./InspectionPlans";
 
 type Check = { label: string; text: string; passed: boolean };
 type Rule = { name: string; kind: string; summary: string; checks: Check[]; points: number };
@@ -65,7 +66,29 @@ const RANK: Record<string, number> = { bad: 0, warn: 1, ok: 2, skip: 3 };
 const worst = (d: StatusDevice) => Math.min(...d.checks.map((c) => RANK[c.status] ?? 3), 3);
 const isHigh = (s: string) => s === "high" || s === "高" || s === "要紧";
 
+/** 巡检页两个子页签：巡检结果（内置的趋势 + 状态巡检）/ 巡检计划（对话制定的自定义清单 + 周期）。
+ *  沿用现有导航，不另开一级菜单；`#inspection?plans` 直接打开计划页签。 */
 export default function Inspection() {
+  const t = useT();
+  const [view, setView] = useState<"results" | "plans">(() => (location.hash.includes("plans") ? "plans" : "results"));
+  const pick = (v: "results" | "plans") => { setView(v); history.replaceState(null, "", v === "plans" ? "#inspection?plans" : "#inspection"); };
+  return (
+    <div className="mx-auto max-w-[1280px] space-y-4">
+      <div className="flex gap-5 border-b border-line" role="tablist" data-testid="inspection-views">
+        {(["results", "plans"] as const).map((v) => (
+          <button key={v} role="tab" aria-selected={view === v} onClick={() => pick(v)}
+            className={cn("-mb-px border-b-2 px-0.5 pb-2 text-[13px] font-medium transition",
+              view === v ? "border-brand text-brand" : "border-transparent text-slate-600 hover:text-slate-900")}>
+            {t(v === "plans" ? "inspection.view.plans" : "inspection.view.results")}
+          </button>
+        ))}
+      </div>
+      {view === "plans" ? <InspectionPlans /> : <InspectionResults />}
+    </div>
+  );
+}
+
+function InspectionResults() {
   const t = useT();
   const [d, setD] = useState<Data | null>(null);
   const [cfg, setCfg] = useState<InspectionConfig | null>(null);
@@ -119,7 +142,7 @@ export default function Inspection() {
   const diff = d.diff;
   const hasDiff = !!(diff?.status || diff?.trend);
   return (
-    <div className="mx-auto max-w-[1280px] space-y-4">
+    <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-slate-600">{t("inspection.intro")}</p>
         <Btn tone="brand" busy={running} disabled={running} onClick={rerun}>{running ? t("inspection.running") : t("inspection.run")}</Btn>

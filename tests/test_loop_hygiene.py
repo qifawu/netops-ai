@@ -211,6 +211,7 @@ class Test完全相同调用的缓存(unittest.TestCase):
             ("nb_devices", ()): None,
             ("topology_neighbors", ()): None,
             ("sop_lookup", ()): None,
+            ("doc_search", ()): None,
             ("list_analyses", ()): None,
             ("get_analysis", ()): None,
             ("zbx_chart", ()): 0,

@@ -452,6 +452,7 @@ def build_incidents(alerts: list[dict]) -> list[dict]:
                     "args": t.get("args"),
                     "ok": t.get("ok"),
                     "error": humanize_text(t.get("error", "")),
+                    **_trace_result(t),
                 }
                 for t in trace
             ],
@@ -581,6 +582,22 @@ def build_topology_view(incidents: list[dict], *, window_hours: int = 24) -> dic
     }
 
 
+#: 调查步骤里「原始返回」最多带多少字符给前端；超出的截断并标注，完整内容仍在 records/alert-*.json 里。
+TRACE_RESULT_MAX_CHARS = 8000
+
+
+def _trace_result(step: dict) -> dict:
+    """把一步工具调用的原始返回带给前端（巡检页「调查步骤」展开后看）。没有记录就不带 `result` 键，
+    前端据此显示「没有保存这一步的原始返回」；有就一律转成字符串并截断。"""
+    if "result" not in step or step.get("result") is None:
+        return {}
+    raw = step["result"]
+    text = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False, indent=2, default=str)
+    if len(text) > TRACE_RESULT_MAX_CHARS:
+        return {"result": text[:TRACE_RESULT_MAX_CHARS] + "\n… (truncated)", "result_truncated": True}
+    return {"result": text}
+
+
 def _elapsed_total(alert: dict) -> float:
     """一次分析从窗口关闭起算的总耗时（秒）。
 
@@ -635,17 +652,24 @@ def _schedule_status(cfg: dict) -> dict:
     from . import schedule
 
     minutes = schedule.interval_minutes(cfg)
+    try:
+        n_plans, plans_ok, plans_note = schedule.plans_status()
+    except Exception:  # noqa: BLE001 - 计划目录读坏了不该让状态点整个出错
+        n_plans, plans_ok, plans_note = 0, True, ""
     if not minutes:
+        if n_plans:  # 内置定时巡检没开，但有启用的巡检计划
+            return {"key": "schedule", "label": f"巡检计划 {n_plans} 个启用", "ok": plans_ok, "note": plans_note}
         return {"key": "schedule", "label": "定时任务未开", "ok": False, "note": "配 SCHEDULE_INTERVAL_MINUTES 打开"}
     st = schedule.load_state()
-    if not st:
-        return {"key": "schedule", "label": f"定时任务 每 {minutes} 分钟", "ok": True, "note": "还没跑过第一轮"}
+    if not st or not st.get("jobs"):
+        return {"key": "schedule", "label": f"定时任务 每 {minutes} 分钟", "ok": plans_ok,
+                "note": "还没跑过第一轮" + (f"；{plans_note}" if plans_note else "")}
     jobs = st.get("jobs") or {}
     return {
         "key": "schedule",
         "label": f"定时任务 每 {minutes} 分钟",
-        "ok": all(j.get("ok") for j in jobs.values()),
-        "note": f"上一轮 {st.get('at', '')}：" + "；".join(j.get("note", "") for j in jobs.values()),
+        "ok": all(j.get("ok") for j in jobs.values()) and plans_ok,
+        "note": f"上一轮 {st.get('at', '')}：" + "；".join(j.get("note", "") for j in jobs.values()) + (f"；{plans_note}" if plans_note else ""),
     }
 
 

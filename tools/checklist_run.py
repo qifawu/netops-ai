@@ -5,6 +5,10 @@
     python tools/checklist_run.py run      examples/checklists/core-health.yaml --every 60 --count 24
     python tools/checklist_run.py trend    core-health --last 12                           # print the LLM prompt
     python tools/checklist_run.py trend    core-health --last 12 --ask-llm                 # and ask the model
+    python tools/checklist_run.py run      my-plan                                         # a plan saved from the web UI
+
+A plan made in the web UI (Inspection → Inspection plans) is stored as `inspection-plans/<name>.yaml`: the same
+format plus `schedule` and `enabled`. `validate` / `run` accept either a file path or a plan name.
 
 Device credentials come from `.env` (`DEVICE_USERNAME`, `DEVICE_PASSWORD`, `DEVICE_VENDOR`, `DEVICE_TRANSPORT`):
 use a read-only account. Every command goes through the read-only command whitelist; refused commands are
@@ -47,8 +51,22 @@ def _print_summary(result: dict, path: Path) -> None:
     print(f"stored: {path}")
 
 
+def _resolve(arg: str) -> Path:
+    """文件路径，或者网页上存下的计划名（`inspection-plans/<name>.yaml`）。"""
+    p = Path(arg)
+    if p.exists():
+        return p
+    from netops_ai.inspection.plans import PlanError, plan_path
+
+    try:
+        q = plan_path(arg)
+    except PlanError:
+        return p
+    return q if q.exists() else p
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
-    problems = validate_checklist(load_checklist(args.checklist))
+    problems = validate_checklist(load_checklist(_resolve(args.checklist)))
     if problems:
         print("INVALID")
         for p in problems:
@@ -61,7 +79,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     from netops_ai.topology import _default_adapter_factory
 
-    cl = load_checklist(args.checklist)
+    cl = load_checklist(_resolve(args.checklist))
     problems = validate_checklist(cl)
     if problems:
         print("INVALID")

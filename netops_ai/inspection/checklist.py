@@ -24,6 +24,14 @@ Checklist format::
           - {type: regex, value: 'GigabitEthernet0/0\\s+\\S+\\s+YES\\s+\\S+\\s+up\\s+up', severity: critical}
         extract:
           - {name: input_errors, regex: '(\\d+) input errors', cast: int}
+      - id: ospf
+        command: show ip ospf neighbor
+        devices: [D1]            # optional: run this check only on these devices (default: all)
+        extract:
+          - {name: full_neighbors, regex: '(FULL)', agg: count}   # agg: first (default) | sum | max | count
+
+A plan (`netops_ai/inspection/plans.py`) is the same mapping plus `schedule` and `enabled`;
+the extra keys are ignored here.
 """
 from __future__ import annotations
 
@@ -39,6 +47,8 @@ import yaml
 from netops_ai.devices.whitelist import SUPPORTED_VENDORS, check as whitelist_check
 
 EXPECT_TYPES = ("contains", "not_contains", "regex", "not_regex")
+#: 一条输出里提取多处数字时怎么合成一个值：first 第一处（默认）/ sum 求和 / max 最大 / count 命中次数
+EXTRACT_AGGS = ("first", "sum", "max", "count")
 SEVERITIES = ("info", "warning", "critical")
 MAX_OUTPUT_CHARS = 6000
 
@@ -83,6 +93,7 @@ def validate_checklist(cl: dict[str, Any]) -> list[str]:
         problems.append("checks: a non-empty list is required")
         return problems
     seen: set[str] = set()
+    device_names = {d.get("name") for d in devices if isinstance(d, dict)} if isinstance(devices, list) else set()
     for i, c in enumerate(checks):
         where = f"checks[{i}]"
         if not isinstance(c, dict):
@@ -102,6 +113,14 @@ def validate_checklist(cl: dict[str, Any]) -> list[str]:
             verdict = whitelist_check(vendor, cmd)
             if not verdict.allowed:
                 problems.append(f"{where}.command {cmd!r}: refused by the read-only whitelist ({verdict.reason})")
+        scope = c.get("devices")
+        if scope is not None:
+            if not isinstance(scope, list) or not all(isinstance(x, str) for x in scope):
+                problems.append(f"{where}.devices: a list of device names (omit it to run on every device)")
+            else:
+                unknown = [x for x in scope if x not in device_names]
+                if unknown:
+                    problems.append(f"{where}.devices: {', '.join(unknown)} not in the checklist's devices")
         for j, e in enumerate(c.get("expect") or []):
             problems.extend(_validate_expect(f"{where}.expect[{j}]", e))
         for j, x in enumerate(c.get("extract") or []):
@@ -141,6 +160,8 @@ def _validate_extract(where: str, x: Any) -> list[str]:
         out.append(f"{where}.regex: invalid regex ({exc})")
     if x.get("cast", "float") not in ("int", "float"):
         out.append(f"{where}.cast: int or float")
+    if x.get("agg", "first") not in EXTRACT_AGGS:
+        out.append(f"{where}.agg: one of {', '.join(EXTRACT_AGGS)}")
     return out
 
 
@@ -161,13 +182,27 @@ def _evaluate(expect: dict[str, Any], output: str) -> dict[str, Any]:
 
 
 def _extract(spec: dict[str, Any], output: str) -> float | int | None:
-    m = re.search(spec["regex"], output, re.MULTILINE)
-    if not m:
+    agg = spec.get("agg", "first")
+    cast = int if spec.get("cast", "float") == "int" else float
+    if agg == "count":
+        return len(re.findall(spec["regex"], output, re.MULTILINE))  # 没命中就是 0，不是"取不到"
+    if agg == "first":
+        m = re.search(spec["regex"], output, re.MULTILINE)
+        if not m:
+            return None
+        try:
+            return cast(m.group(1))
+        except ValueError:
+            return None
+    values = []
+    for m in re.finditer(spec["regex"], output, re.MULTILINE):
+        try:
+            values.append(cast(m.group(1)))
+        except ValueError:
+            continue
+    if not values:
         return None
-    try:
-        return (int if spec.get("cast", "float") == "int" else float)(m.group(1))
-    except ValueError:
-        return None
+    return sum(values) if agg == "sum" else max(values)
 
 
 def _run_check(adapter: Any, check: dict[str, Any]) -> dict[str, Any]:
@@ -212,6 +247,8 @@ def run_checklist(cl: dict[str, Any], adapter_factory: AdapterFactory) -> dict[s
             continue
         try:
             for c in cl["checks"]:
+                if c.get("devices") is not None and d["name"] not in c["devices"]:
+                    continue  # 这条检查只针对别的设备
                 dev["checks"].append(_run_check(adapter, c))
         finally:
             close = getattr(adapter, "close", None)
@@ -247,9 +284,12 @@ def load_history(out_dir: str | Path, name: str, last: int = 12) -> list[dict[st
     runs = []
     for f in Path(out_dir).glob(f"*-{name}-*.json"):
         try:
-            runs.append(json.loads(f.read_text(encoding="utf-8")))
+            run = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
+        # 文件名通配会串名：`core` 的通配也命中 `core-health` 的结果文件，所以按记录里的名字再筛一遍
+        if isinstance(run, dict) and run.get("checklist") == name:
+            runs.append(run)
     runs.sort(key=lambda r: r.get("started_at", ""))  # order by the recorded start time, not by file name
     return runs[-last:]
 

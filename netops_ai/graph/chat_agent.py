@@ -75,6 +75,7 @@ from netops_ai.llm.factory import env
 from netops_ai.playbooks.lookup import sop_lookup
 
 
+from netops_ai.docs_kb.search import search as search_docs
 
 
 from netops_ai.topology import known_device_labels, load_topology, resolve_device, topology_neighbors
@@ -670,6 +671,55 @@ def build_history_tools(trace: ChatRunTrace, budget: AgentLoopBudget | None = No
     ]
 
 
+def build_doc_tools(trace: ChatRunTrace, budget: AgentLoopBudget | None = None) -> list[StructuredTool]:
+    """Read-only vendor documentation lookup, deliberately opt-in."""
+    budget = budget or AgentLoopBudget()
+
+    def doc_search(query: str, vendor: str = "", limit: int = 5) -> str:
+        started = time.perf_counter()
+        record = ToolCallRecord(
+            tool="doc_search",
+            args={"query": query, "vendor": vendor, "limit": limit},
+            ok=False,
+        )
+        try:
+            cfg = env()
+            db_path = cfg.get("DOC_SEARCH_DB", str(REPO_ROOT / "records" / "docs_kb.db"))
+            rows = search_docs(db_path, query, vendor=vendor.strip() or None, limit=limit)
+            record.ok = True
+            record.result = rows
+            if not rows:
+                return "文档知识库没有命中；这不是设备实测证据。"
+            blocks = []
+            for row in rows:
+                blocks.append(
+                    "【文档参考·非设备证据】"
+                    f"[来源: {row.get('source', '')} › {row.get('heading_path', '')}]\n"
+                    f"{row.get('snippet', '')}"
+                )
+            return "\n\n".join(blocks)
+        except Exception as exc:  # noqa: BLE001 - 文档库故障不能打断诊断
+            record.error = f"{type(exc).__name__}: {exc}"
+            return json.dumps({"error": record.error}, ensure_ascii=False)
+        finally:
+            record.elapsed_ms = int((time.perf_counter() - started) * 1000)
+            trace.record_tool_call(record, budget)
+
+    return [
+        StructuredTool.from_function(
+            func=doc_search,
+            name="doc_search",
+            description=(
+                "检索本地厂商文档索引（目前是 Cisco 文档），返回匹配片段和出处"
+                "（source › heading_path），可用来查日志/告警/命令输出的含义与常见原因。"
+                "索引内容：IOS 15 系 OSPF/BGP 配置指南与命令参考、OSPF/BGP/SNMP/接口/重启的排障文章、"
+                "show 命令输出字段说明，以及常见日志消息（%设施-级别-助记符，如 %OSPF-5-ADJCHG）的含义速查表。"
+                "返回的是厂商文档，不是这台设备的实测证据。"
+                "参数：query 检索词（英文关键词或日志助记符命中最好，中文常用词会自动补对应英文）；"
+                "vendor 可选厂商过滤；limit 默认 5。没有命中时返回一句说明。"
+            ),
+        )
+    ]
 
 
 def build_chat_tools(
@@ -681,7 +731,16 @@ def build_chat_tools(
     include_doc_search: bool | None = None,
 ) -> list[StructuredTool]:
     """告警管道用 `functools.partial(build_chat_tools, device_host=...)`
-    把本次要连的设备绑进来，`run_agent_loop` 的签名一个字都不用改。
+ 把本次要连的设备绑进来，`run_agent_loop` 的签名一个字都不用改。
+
+ `include_doc_search`：显式传 True/False 时覆盖 `DOC_SEARCH` 环境变量。
+ A16（负责人拍板）：「llm+工具+知识库」是告警这条线要的标准形状，
+ `doc_search`（本地 FTS5 索引的厂商文档，已经测过）就是那个知识库工具，
+ 只是以前默认关着——`_run_ai_exploration` 现在显式传 `True` 把它在告警这条线
+ 打开。对话（`chat_agent.py` 自己走的那条）当时继续吃 `DOC_SEARCH` 环境变量；
+ 维护者拍板对话也显式打开（见 `ChatAgentService.answer`）。RAGFlow（A4 押后的那半）容器还停着，
+ 没法验证真实响应格式，没有接——真要接，`doc_search` 已经证明了「知识库
+ 当工具」这个形状能跑，RAGFlow 只是多一个来源，不是要重新设计。
     """
     tools = [
         *build_zabbix_tools(trace, budget),
@@ -691,4 +750,11 @@ def build_chat_tools(
         *build_inspection_tools(trace, budget),
         *build_history_tools(trace, budget),
     ]
+    doc_search_on = (
+        include_doc_search
+        if include_doc_search is not None
+        else str(env().get("DOC_SEARCH", "")).strip().lower() == "on"
+    )
+    if doc_search_on:
+        tools.extend(build_doc_tools(trace, budget))
     return tools

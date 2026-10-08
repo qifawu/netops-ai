@@ -157,3 +157,17 @@ class TestInspectionPersistence(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTraceResult(unittest.TestCase):
+    def test_result_is_passed_through_as_text_and_capped(self):
+        from netops_ai.api import dashboard
+
+        self.assertEqual(dashboard._trace_result({"tool": "x"}), {})
+        self.assertEqual(dashboard._trace_result({"result": None}), {})
+        self.assertEqual(dashboard._trace_result({"result": "abc"}), {"result": "abc"})
+        out = dashboard._trace_result({"result": {"a": 1}})
+        self.assertIn('"a": 1', out["result"])
+        big = dashboard._trace_result({"result": "x" * (dashboard.TRACE_RESULT_MAX_CHARS + 5)})
+        self.assertTrue(big["result_truncated"])
+        self.assertTrue(big["result"].endswith("(truncated)"))

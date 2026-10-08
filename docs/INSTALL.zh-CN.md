@@ -135,6 +135,7 @@ return 'OK';
 - **Docker 里的 Zabbix**：`deploy/zabbix/`，见它的 README。
 - **SNMP trap**（比轮询更快发现链路 / OSPF / BGP 事件）：`deploy/trap/` 里是实验室脚本，用来装 `snmptrapd` 和加 trap 监控项。它们会改实验室里的设备和虚拟机配置，先读再跑。
 - **试验用实验室**：[LAB.zh-CN.md](LAB.zh-CN.md) 描述了参考实验环境（7 台 Cisco、Zabbix、trap、制造过的故障）以及怎么自己搭一个类似的。
+- **文档检索**：索引随仓库是空的。先用 3 篇示例笔记试一下：`python tools/kb_ingest.py examples/kb`，然后打开知识库页。自己用的话，灌你有权使用的文档（`python tools/kb_ingest.py --help`）；agent 的 `doc_search` 工具返回的片段会标成厂商文档，不会当作设备证据。
 - **定时巡检**：API 进程运行期间，每 `SCHEDULE_INTERVAL_MINUTES`（默认 60）分钟跑一次。
 
 ### 3.5 从 NetBox 取拓扑（可选）

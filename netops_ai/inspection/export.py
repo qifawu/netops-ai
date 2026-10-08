@@ -97,14 +97,17 @@ def _md_cell(text: Any) -> str:
     return str(text).replace("|", "\\|").replace("\n", " ")
 
 
-def render_markdown(view: dict[str, Any]) -> str:
+def blocks_to_markdown(blocks: list[Block]) -> str:
+    """中性的块 → Markdown。巡检报告和巡检计划报告共用。"""
     out: list[str] = []
-    for block in build_blocks(view):
+    for block in blocks:
         kind = block[0]
         if kind in ("h1", "h2", "h3"):
             out += [f"{'#' * int(kind[1])} {block[1]}", ""]
         elif kind == "p":
             out += [block[1], ""] if block[1] else []
+        elif kind == "text":  # 模型写的 Markdown 段落（趋势分析结论），原样放
+            out += [block[1].strip(), ""] if block[1] else []
         elif kind == "ul":
             out += [*(f"- {item}" for item in block[1]), ""]
         elif kind == "code":
@@ -117,24 +120,41 @@ def render_markdown(view: dict[str, Any]) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
+def render_markdown(view: dict[str, Any]) -> str:
+    return blocks_to_markdown(build_blocks(view))
+
+
 _CSS = (
     "body{font:14px/1.7 -apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;max-width:980px;margin:32px auto;padding:0 20px;color:#1e293b}"
     "h1{font-size:24px}h2{font-size:18px;margin-top:32px;border-bottom:1px solid #e2e8f0;padding-bottom:6px}h3{font-size:15px;margin-top:20px}"
     "table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid #e2e8f0;padding:6px 10px;text-align:left;vertical-align:top}"
     "th{background:#f8fafc}pre{background:#0f172a;color:#e2e8f0;padding:10px 14px;border-radius:8px;overflow-x:auto;font-size:12px}"
     ".bad{color:#be123c;font-weight:600}.warn{color:#b45309;font-weight:600}.ok{color:#047857}"
+    ".text{white-space:pre-wrap;border-left:3px solid #e2e8f0;padding-left:12px}"
 )
 
 
-def render_html(view: dict[str, Any]) -> str:
+def _status_cell(row: list[Any]) -> tuple[int, str] | None:
+    """巡检报告的状态表（5 列，第 4 列是状态）给状态那一格上色。"""
+    if len(row) != 5:
+        return None
+    cls = {v: k for k, v in _STATUS_CN.items()}.get(str(row[3]), "")
+    return (3, cls) if cls else None
+
+
+def blocks_to_html(blocks: list[Block], title: str, classify: Any = _status_cell) -> str:
+    """中性的块 → 自包含 HTML。`classify(row)` 返回（要上色的列, css 类）或 None。"""
     body: list[str] = []
-    for block in build_blocks(view):
+    for block in blocks:
         kind = block[0]
         if kind in ("h1", "h2", "h3"):
             body.append(f"<{kind}>{escape(block[1])}</{kind}>")
         elif kind == "p":
             if block[1]:
                 body.append(f"<p>{escape(block[1])}</p>")
+        elif kind == "text":
+            if block[1]:
+                body.append(f'<div class="text">{escape(block[1].strip())}</div>')
         elif kind == "ul":
             body.append("<ul>" + "".join(f"<li>{escape(i)}</li>" for i in block[1]) + "</ul>")
         elif kind == "code":
@@ -143,11 +163,15 @@ def render_html(view: dict[str, Any]) -> str:
             head = "".join(f"<th>{escape(h)}</th>" for h in block[1])
             rows = []
             for row in block[2]:
-                cls = {v: k for k, v in _STATUS_CN.items()}.get(str(row[3]), "") if len(row) == 5 else ""
+                hit = classify(row) if classify else None
                 cells = "".join(
-                    f'<td class="{cls}">{escape(str(c))}</td>' if i == 3 and cls else f"<td>{escape(str(c))}</td>"
+                    f'<td class="{hit[1]}">{escape(str(c))}</td>' if hit and i == hit[0] else f"<td>{escape(str(c))}</td>"
                     for i, c in enumerate(row)
                 )
                 rows.append(f"<tr>{cells}</tr>")
             body.append(f"<table><tr>{head}</tr>{''.join(rows)}</table>")
-    return f'<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>网络巡检报告</title><style>{_CSS}</style></head><body>{"".join(body)}</body></html>'
+    return f'<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>{escape(title)}</title><style>{_CSS}</style></head><body>{"".join(body)}</body></html>'
+
+
+def render_html(view: dict[str, Any]) -> str:
+    return blocks_to_html(build_blocks(view), "网络巡检报告")

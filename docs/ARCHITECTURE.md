@@ -39,6 +39,7 @@ All tools are read-only and registered in one place (`netops_ai/graph/chat_agent
 | `topology_neighbors` | Neighbors of a device/interface — from NetBox when `NETBOX_URL` is set, otherwise from `topology.yaml` |
 | `nb_devices`, `nb_topology` | NetBox inventory (read-only; only present when NetBox is configured) |
 | `sop_lookup` | Find a matching SOP playbook (it *advises*; it never executes anything) |
+| `doc_search` | BM25 search over your local documentation index |
 | `run_inspection`, `list_analyses`, `get_analysis` | Run/read an inspection, look up earlier conclusions |
 
 Tool results are returned as facts only. Empty results say they are empty and echo the query; truncation says it truncated. Routing advice ("try X next") lives in the system prompt or playbooks, never inside a tool result, so tools stay neutral for any agent that calls them.
@@ -79,7 +80,7 @@ An optional model call turns findings into "what to handle tonight / what to ign
 
 ## Layout of the web UI
 
-`web/` is a Vite + React + TypeScript app, served by the FastAPI process once built (`web/dist`). It reads only the JSON API in `netops_ai/api/`; the pages are overview, incidents & conclusions, device & topology, inspection, command audit and settings. A demo-mode toggle masks IPs and IDs for screenshots.
+`web/` is a Vite + React + TypeScript app, served by the FastAPI process once built (`web/dist`). It reads only the JSON API in `netops_ai/api/`; the pages are overview, incidents & conclusions, device & topology, inspection, command audit, knowledge base and settings. A demo-mode toggle masks IPs and IDs for screenshots.
 
 ## Design rules worth knowing before you change things
 

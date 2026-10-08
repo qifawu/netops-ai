@@ -15,9 +15,11 @@
 - **Structured conclusions.** Root cause, confidence and the quoted evidence, checked against six hypothesis families. If the cause cannot be determined, the result states what is missing and which command would settle it.
 - **Topology.** From NetBox (optional, read-only, webhook refresh) or from a YAML file.
 - **Playbooks (SOP).** YAML advice for the agent, with a linter; six examples: interface down, OSPF adjacency, BGP session, device restart, high CPU, interface errors.
+- **Conversational inspection plans.** Define a plan in the dashboard by talking to an assistant: what you care about, which devices, how often. The assistant proposes checks and a schedule, and looks commands up in the command catalog and the document library when you do not remember them. New plans and changes to existing ones go through the same flow. **The commands, the target machines and the schedule must each be confirmed before the plan is saved and enabled**; plans can be paused, rescheduled and deleted, every run is stored, and trend analysis and report export are available.
 - **Scheduled inspection.** Trend detectors on Zabbix history, live read-only status checks, history, diff against the previous run, Markdown/HTML export.
 - **Investigation trace and command audit.** Every step of an incident's investigation is recorded (tool, arguments, result); the audit page lists every command the agent ran and every command the whitelist refused.
-- **Dashboard.** Chinese and English: overview, incidents, topology, inspection, audit, settings. A demo mode masks IP addresses and IDs.
+- **Local documentation search (knowledge base).** Keyword (BM25) search over your own documents, used by the agent's `doc_search` tool, the knowledge-base page and the inspection planner's command lookup. The index ships empty; build it with `tools/kb_ingest.py`. Results are labelled as documentation, never as device evidence.
+- **Dashboard.** Chinese and English: overview, incidents, topology, inspection, audit, knowledge base, settings. A demo mode masks IP addresses and IDs.
 - **Demo scripts.** `tools/demo_replay.py` and `tools/seed_demo.py` populate the dashboard without a lab.
 
 ## How it works
@@ -29,6 +31,10 @@
 <p align="center"><img src="docs/images/guard.png" alt="two-layer read-only guard" width="900"></p>
 
 - **Conclude.** The model fills a strict schema. For each of six hypothesis families (local action, local hardware/resource, remote/upstream, link/path quality, management plane, monitoring artifact) it must report supported, ruled out (with counter-evidence) or undetermined. An undetermined result must state which data and which command would settle it.
+- **Inspection plans (defined by conversation).** The conversation is a LangGraph state graph: the entry splits new plans from changes to existing ones; each turn the model returns a reply, a draft and suggestions; the draft is immediately checked for format and against the read-only whitelist, and on failure the problems go back to the model (at most 2 repairs) before anything is let through; when the user does not remember a command, candidates are searched in the command catalog and the document library and each candidate passes the whitelist too; the confirmation step requires the commands, the machines and the schedule to be confirmed one by one before saving. A write command cannot enter a plan.
+
+<p align="center"><img src="docs/images/inspection-plan-flow.png" alt="conversational inspection plan flow" width="1000"></p>
+
 - **Inspect (before anything alerts).** Two checks, both decided by fixed rules rather than the model. *Trend inspection* reads only Zabbix history and runs three detectors: a sustained one-way trend (e.g. error counters climbing), a periodic spike, and a self-healing flap. *Status inspection* logs into each device read-only and checks interface up/up, OSPF neighbors all FULL, BGP sessions Established, and error-counter growth since the last run. Every finding quotes the device's own output. An optional model call then sorts findings into "handle tonight / ignore (with reason) / can't tell". Each run is stored so the page shows what is new or gone, and reports export to Markdown/HTML. Thresholds and scope live in `inspection.yaml`.
 
 ## Tools
@@ -42,6 +48,7 @@
 | `topology_neighbors` | Neighbors of a device or interface — from NetBox if configured, else `topology.yaml` |
 | `nb_devices`, `nb_topology` | NetBox inventory (read-only, when NetBox is configured) |
 | `sop_lookup` | Find the matching playbook — it advises, it never executes |
+| `doc_search` | Keyword (BM25) search over your own documents |
 | `run_inspection`, `get_analysis` | Run an inspection, look up an earlier conclusion |
 
 **Bundled command-line tools** (all runnable offline unless noted):
@@ -53,6 +60,7 @@
 | `python tools/demo_replay.py` | Replay saved alert records and render the Feishu card, no network needed |
 | `python tools/seed_demo.py` | Fill `records/` with six synthetic incidents so the dashboard has data |
 | `python tools/sop_lint.py` | Lint playbooks: real tools, real parameters, commands the whitelist accepts |
+| `python tools/kb_ingest.py <dir>` | Build the local documentation index (SQLite FTS5) from `.md/.txt/.html/.pdf` |
 | `python tools/llm_doctor.py` | Check your LLM endpoint with a multi-turn tool-call replay (calls the model) |
 
 ## What it looks like
@@ -88,6 +96,26 @@ Fault injected: `neighbor 10.0.0.2 shutdown` on V1. Six alerts arrived from both
 **Automated inspection**: trend findings plus read-only status checks of every device:
 
 <p align="center"><img src="docs/images/ui-inspection.png" alt="Inspection" width="900"></p>
+
+**Knowledge base** (Chinese UI; the dashboard also has an English UI):
+
+<p align="center"><img src="docs/images/ui-knowledge.png" alt="Knowledge base" width="760"></p>
+
+### What was checked at each step
+
+Every incident keeps the agent's investigation trace: which tool was called, with which arguments, and what came back, expandable step by step; the audit page summarises all commands.
+
+<p align="center"><img src="docs/images/real-trace-en.png" alt="investigation steps" width="460"></p>
+
+### Defining an inspection plan by conversation
+
+The assistant asks one or two key questions at a time and the draft with its validation status is updated live on the right; when the user forgets a command, the assistant lists candidate commands with their source and adds the chosen one to the draft.
+
+<p align="center"><img src="docs/images/plan-chat-en.png" alt="defining a plan by conversation" width="900"></p>
+
+Before saving, the commands, the target machines and the schedule must each be confirmed:
+
+<p align="center"><img src="docs/images/plan-confirm-en.png" alt="three-item confirmation before saving" width="900"></p>
 
 ### Lab test cases
 

@@ -181,6 +181,31 @@ class TestChatAgentTools(unittest.TestCase):
         self.assertIn("device_show", names)
         self.assertIn("device_show_many", names)
 
+    def test_include_doc_search_true覆盖环境变量打开知识库工具(self):
+        """A16：告警这条线显式传 include_doc_search=True，不管 DOC_SEARCH 有没有配。"""
+        trace = chat_agent.ChatRunTrace(trace_id="t", question="q", session_id="s")
+        with mock.patch("netops_ai.graph.chat_agent.env", return_value={}):
+            names = {
+                t.name
+                for t in chat_agent.build_chat_tools(trace, chat_agent.AgentLoopBudget(), include_doc_search=True)
+            }
+        self.assertIn("doc_search", names)
+
+    def test_include_doc_search_false覆盖环境变量关掉知识库工具(self):
+        trace = chat_agent.ChatRunTrace(trace_id="t", question="q", session_id="s")
+        with mock.patch("netops_ai.graph.chat_agent.env", return_value={"DOC_SEARCH": "on"}):
+            names = {
+                t.name
+                for t in chat_agent.build_chat_tools(trace, chat_agent.AgentLoopBudget(), include_doc_search=False)
+            }
+        self.assertNotIn("doc_search", names)
+
+    def test_include_doc_search不传时仍然吃环境变量(self):
+        """对话那条线没有跟着 A16 变——不传这个参数就是老行为。"""
+        trace = chat_agent.ChatRunTrace(trace_id="t", question="q", session_id="s")
+        with mock.patch("netops_ai.graph.chat_agent.env", return_value={}):
+            names = {t.name for t in chat_agent.build_chat_tools(trace, chat_agent.AgentLoopBudget())}
+        self.assertNotIn("doc_search", names)
 
 
 class TestToolLabelsNeverDriftFromRegisteredNames(unittest.TestCase):
