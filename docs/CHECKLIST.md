@@ -12,6 +12,18 @@ An inspection plan is a list of read-only checks per device plus a schedule. You
 4. **The draft pane** shows the plan name, the schedule (every 15 minutes, hourly, every 6 hours, or daily at a given time — editable right there), the devices, a table of checks and the validation result: green *"Valid: format OK, every command passes the read-only whitelist"*, or red with every problem listed.
 5. **Confirmation card.** When the assistant considers the plan complete and the draft is valid, a card appears with three columns, each of which must be ticked separately: **① the commands** each device will run, **② the devices**, **③ the schedule**. Each column can be edited in place (remove a command or a device, change the schedule); editing a column clears its tick. *All three confirmed — enable* saves the plan. *Not yet — back to the conversation* returns to the assistant with the unticked items, e.g. *"I have not confirmed the schedule yet"*.
 
+## Pickers and hints inside the conversation
+
+You do not have to type everything. When the draft is missing something, the assistant's bubble carries an interactive picker for the first gap:
+
+- **Device picker** (devices not decided yet — also offered in the opening message): devices grouped by layer (core / aggregation / access, from the topology or NetBox roles), each with its name, neighbor count and management address (masked in demo mode). Quick buttons *All core*, *All aggregation*, *All access*, *All devices*; *Select all* / *Clear* per group; devices already in the draft are pre-ticked. **Pick devices** next to *Devices* in the draft pane reopens it at any time.
+- **Schedule picker**: chips for every 15 minutes, hourly, every 6 hours, or daily at a chosen time; a click writes it to the draft. A one-line reason sits next to it (counter checks no more often than every 5 minutes, a trend needs at least 3 runs).
+- **Check picker**: one row per check template with its purpose and the command it will run (expandable), recommended items pre-ticked for the chosen device roles. If you can't remember a command, describe it in words and the command lookup below still applies.
+
+Submitting a picker sends the choice back as a structured message: it is applied to the draft **deterministically, without calling the model** (devices must exist in the topology, templates in the template library, the schedule must be valid), and the next picker follows until nothing is missing — then the confirmation card appears. A submitted picker turns into a one-line read-only summary (*Selected: Core 2, Aggregation 2*) with a *Change* link; only the newest picker in the conversation can be used, older ones are marked expired and rejected by the server. Pickers work with the keyboard (Tab, Space to tick, Enter to confirm).
+
+Below an assistant reply there may also be up to two **hints** — lighter than suggestions (small grey text, a thin bar on the left, not clickable) and produced by rules, not by the model: *write commands are never accepted*, *for core devices watch OSPF and BGP*, *counter checks no more often than every 5 minutes*, *a trend needs at least 3 runs*. Each hint appears once per conversation and can be dismissed.
+
 ## Adjusting an existing plan
 
 Click **Adjust** on a plan row (or **Adjust a plan** at the top and pick one from the list the assistant shows: name, devices, checks, schedule, enabled, last result). The plan is loaded as the draft and the assistant asks what to change: add or remove checks or commands, other devices, the schedule, or pausing the plan. The same validation and the same three-item confirmation apply; confirming writes the changes back to the same plan.
@@ -147,8 +159,9 @@ One conversation is one thread of a LangGraph `StateGraph` (`netops_ai/graph/pla
 
 | Node | Responsibility |
 |---|---|
-| `route_intent` | Entry. *New plan* → start from an empty draft; *adjust* → list the plans or load the chosen one; a message in a new-plan panel that names an existing plan with "adjust/modify" switches to the adjust path. |
-| `opening` | New plan, no message yet: greeting with a topology summary and quick replies. No model call. |
+| `route_intent` | Entry. A submitted picker → `apply_selection`. *New plan* → start from an empty draft; *adjust* → list the plans or load the chosen one; a message in a new-plan panel that names an existing plan with "adjust/modify" switches to the adjust path. |
+| `apply_selection` | Deterministic, no model call: checks a picker submission (only the newest picker counts; devices in the topology, templates in the library, valid schedule) and writes it into the draft, then `validate` → `respond`. |
+| `opening` | New plan, no message yet: greeting with a topology summary, the device picker and quick replies. No model call. |
 | `list_plans` | Adjust, no plan chosen: lists the saved plans (name, devices, checks, schedule, enabled, last result) to pick from. |
 | `load_plan` | Loads the chosen plan as the draft and asks what to change. |
 | `gather_context` | Starts a turn; decides whether the user described something to check without giving a command (or said they don't remember it). |
@@ -156,10 +169,10 @@ One conversation is one thread of a LangGraph `StateGraph` (`netops_ai/graph/pla
 | `propose` | One model call with structured output: reply, complete draft, suggestions, `ready`, `enabled`. Context: device names / roles / neighbor counts (no addresses, no credentials), templates, command catalog, candidates, current draft. |
 | `validate` | Expands templates, fills addresses from the topology, runs the checklist validator including the read-only command whitelist. |
 | `repair` | Sends the problems back to the model for a corrected full draft (at most 2 times), then back to `validate`. |
-| `respond` | Valid draft: reply, model + rule-based suggestions, candidates, `ready`. |
+| `respond` | Reply, model + rule-based suggestions, candidates and hints. If the draft still lacks devices / schedule / checks it attaches the matching picker and stops; only when nothing is missing does it go on to `confirm_plan`. |
 | `respond_blocked` | Still invalid after 2 corrections: problems shown verbatim, offending checks removed, cannot be confirmed. |
 | `rules_fallback` | Model unavailable: rule-based draft that can still be confirmed through the card. |
-| `confirm_plan` | Human-in-the-loop interrupt with the three-item card (commands per device, devices, schedule). All three confirmed → `save`; any item not confirmed → `propose`; another chat message → `gather_context`. |
+| `confirm_plan` | Human-in-the-loop interrupt with the three-item card (commands per device, devices, schedule). All three confirmed → `save`; any item not confirmed → `propose`; a picker submitted before confirming → `apply_selection`; another chat message → `gather_context`. |
 | `save` | Validates once more, writes `inspection-plans/<name>.yaml` (the same file when adjusting), the scheduler picks it up. Name already taken → back to `confirm_plan`. |
 
 Generated with `compiled.get_graph().draw_mermaid()` (`python -c "from netops_ai.graph.plan_graph import mermaid; print(mermaid())"`):
@@ -185,9 +198,12 @@ graph TD;
 	respond_blocked(respond_blocked)
 	rules_fallback(rules_fallback)
 	save(save)
+	apply_selection(apply_selection)
 	confirm_plan(confirm_plan)
 	__end__([<p>__end__</p>]):::last
 	__start__ --> route_intent;
+	apply_selection --> validate;
+	confirm_plan -.-> apply_selection;
 	confirm_plan -.-> gather_context;
 	confirm_plan -.-> propose;
 	confirm_plan -.-> save;
@@ -200,6 +216,7 @@ graph TD;
 	repair -.-> validate;
 	respond -.-> __end__;
 	respond -.-> confirm_plan;
+	route_intent -.-> apply_selection;
 	route_intent -.-> gather_context;
 	route_intent -.-> list_plans;
 	route_intent -.-> load_plan;

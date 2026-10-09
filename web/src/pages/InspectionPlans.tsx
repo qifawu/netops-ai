@@ -5,6 +5,7 @@ import { fill, useLang, useT, type DictKey } from "../lib/i18n";
 import { Btn, call } from "../lib/sopui";
 import Md from "../lib/Md";
 import Spark from "../lib/Spark";
+import { CheckPicker, DevicePicker, Hints, ScheduleChips, WidgetSummary, type Hint, type Selection, type Widget } from "./PlanWidgets";
 
 /** 巡检计划：列表 + 对话式制定（聊天流 + 实时草案预览）+ 单个计划的运行历史 / 指标迷你趋势 / 趋势分析。
  *  草案的真源在后端：每一轮对话、每次「采纳」、每次改周期都回后端重新校验（含只读白名单），前端只负责展示。
@@ -23,11 +24,14 @@ type Turn = {
   session: string; reply: string; draft: Draft; validation: Validation; ready: boolean; suggestions: Suggestion[]; quick_replies: string[];
   source: string; fix_rounds: number; awaiting_confirm: boolean; editing: string; mode: string;
   candidates: Candidate[]; lookup_note: string; docs_status: string; messages?: { role: "user" | "assistant"; content: string }[];
+  widget?: Widget | null; hints?: Hint[];
   saved?: { name: string } | null; save_error?: { message: string; problems?: string[]; status?: number } | null;
 };
 type Msg = {
   role: "user" | "assistant"; content: string; suggestions?: Suggestion[]; quick?: string[]; source?: string; fix?: number;
   candidates?: Candidate[]; lookupNote?: string;
+  widget?: Widget; widgetDone?: string; hints?: Hint[];
+  hidden?: boolean;  // 气泡选择回传的那条「用户消息」：发给后端当上下文，聊天流里不单独显示（气泡自己变成摘要）
 };
 type Confirmed = { commands: boolean; devices: boolean; schedule: boolean };
 const NONE: Confirmed = { commands: false, devices: false, schedule: false };
@@ -316,6 +320,7 @@ function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; p
   const [editing, setEditing] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [ifname, setIfname] = useState<Record<string, string>>({});
+  const [closedHints, setClosedHints] = useState<Set<string>>(new Set());
   const scroller = useRef<HTMLDivElement>(null);
 
   const apply = (r: Turn) => {
@@ -334,12 +339,13 @@ function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; p
     return true;
   });
   const asMsg = (r: Turn): Msg => ({ role: "assistant", content: r.reply, suggestions: freshSuggestions(r.suggestions ?? []), quick: r.quick_replies, source: r.source,
-    fix: r.fix_rounds, candidates: r.candidates, lookupNote: r.docs_status ? r.lookup_note : "" });  // docs_status 有值 = 这一轮查过命令（哪怕没找到也要说）
-  const turn = async (history: Msg[], d: Draft | null) => {
+    fix: r.fix_rounds, candidates: r.candidates, lookupNote: r.docs_status ? r.lookup_note : "",  // docs_status 有值 = 这一轮查过命令（哪怕没找到也要说）
+    widget: r.widget ?? undefined, hints: r.hints ?? [] });
+  const turn = async (history: Msg[], d: Draft | null, selection?: Selection) => {
     setBusy(true);
     const r = await call<Turn>("POST", "/api/inspection/plans/chat", {
-      session: session.current, messages: history.filter((m) => m.source !== "opening").map((m) => ({ role: m.role, content: m.content })),
-      draft: d, lang, mode, plan,
+      session: session.current, messages: history.filter((m) => m.source !== "opening" && m.source !== "widget").map((m) => ({ role: m.role, content: m.content })),
+      draft: d, lang, mode, plan, selection: selection ?? null,
     });
     setBusy(false);
     if (!r.ok) { setMsgs([...history, { role: "assistant", content: r.data.message || t("plans.chat.failed") }]); return; }
@@ -395,6 +401,20 @@ function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; p
     apply(r.data);
     setMsgs((xs) => [...xs, ...(note ? [{ role: "user" as const, content: note.content }] : []), asMsg(r.data)]);
   };
+  /** 气泡里选完：这个气泡变成只读摘要，选择作为一条结构化消息回传（后端确定性地写进草案，不调模型）。 */
+  const submitWidget = (i: number, sel: Selection, summary: string) => {
+    if (busy) return;
+    const history: Msg[] = [...msgs.map((m, j) => (j === i ? { ...m, widgetDone: summary } : m)), { role: "user", content: summary, hidden: true }];
+    setMsgs(history);
+    turn(history, draft, sel);
+  };
+  /** 重新打开一个选择气泡（草案预览里的「选择设备」、摘要上的「修改」）：它成为最新、唯一能操作的那个。 */
+  const reopen = async (type: Widget["type"]) => {
+    if (busy) return;
+    const r = await call<Widget>("POST", "/api/inspection/plans/widget", { session: session.current, type, draft, lang });
+    if (!r.ok) return;
+    setMsgs((xs) => [...xs, { role: "assistant", content: r.data.prompt || "", widget: r.data, source: "widget" }]);
+  };
   const pick = (i: number, c: Candidate) => {
     const key = `${i}:${c.command}`;
     const cmd = c.needs_interface ? c.command.replace("{interface}", (ifname[key] || "").trim()) : c.command;
@@ -406,13 +426,13 @@ function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; p
   const lastAssistant = msgs.map((m) => m.role).lastIndexOf("assistant");
 
   return (
-    <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] gap-4" data-testid="plan-builder">
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]" data-testid="plan-builder">
       <Card className="flex h-[640px] flex-col">
         <CardHead title={editing ? fill(t("plans.chat.titleEdit"), { name: editing }) : t(mode === "edit" ? "plans.adjustExisting" : "plans.chat.title")}
           note={t("plans.chat.note")} icon={<Icon d={PATH.send} />}
           right={<Btn small onClick={onClose}>{t("plans.cancel")}</Btn>} />
         <div ref={scroller} className="flex-1 space-y-3 overflow-y-auto px-4 py-3" data-testid="plan-chat">
-          {msgs.map((m, i) => m.role === "user" ? (
+          {msgs.map((m, i) => m.hidden ? null : m.role === "user" ? (
             <div key={i} className="flex justify-end">
               <div className="max-w-[85%] rounded-[3px] bg-steel-50 px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap text-slate-800 ring-1 ring-steel-200">{m.content}</div>
             </div>
@@ -424,6 +444,13 @@ function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; p
                 {(m.fix ?? 0) > 0 && <Badge className="bg-white text-slate-600 ring-slate-300">{fill(t("plans.chat.fixed"), { n: m.fix! })}</Badge>}
               </div>
               <div className="rounded-[3px] border border-line bg-white px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap text-slate-800">{m.content}</div>
+              <Hints hints={(m.hints ?? []).filter((h) => !closedHints.has(h.id))} onClose={(id) => setClosedHints((s) => new Set(s).add(id))} />
+              {m.widget && (m.widgetDone
+                ? <WidgetSummary text={m.widgetDone} onEdit={() => reopen(m.widget!.type)} />
+                : i !== lastAssistant ? <WidgetSummary text="" expired />
+                  : m.widget.type === "device_picker" ? <DevicePicker key={m.widget.id} w={m.widget} onSubmit={(sel, sum) => submitWidget(i, sel, sum)} />
+                    : m.widget.type === "schedule_picker" ? <ScheduleChips key={m.widget.id} w={m.widget} label={(v) => schedText(t, v)} onSubmit={(sel, sum) => submitWidget(i, sel, sum)} />
+                      : <CheckPicker key={m.widget.id} w={m.widget} onSubmit={(sel, sum) => submitWidget(i, sel, sum)} />)}
               {(m.suggestions?.length ?? 0) > 0 && (
                 <div className="mt-2 space-y-1.5" data-testid="plan-suggestions">
                   {m.suggestions!.map((s) => (
@@ -508,7 +535,11 @@ function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; p
                 <span className="text-xs font-medium text-slate-600">{t("plans.draft.schedule")}</span>
                 <span><SchedulePicker value={draft.schedule} onChange={(s) => patchDraft({ draft: { ...draft, schedule: s } })} /></span>
                 <span className="self-start pt-0.5 text-xs font-medium text-slate-600">{t("plans.draft.devices")}</span>
-                <span className="flex flex-wrap gap-1.5">
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <button type="button" onClick={() => reopen("device_picker")} disabled={busy} data-testid="reopen-devices"
+                    className="order-last rounded-[2px] border border-dashed border-brand/60 px-1.5 py-px text-xs text-brand transition hover:bg-steel-50 disabled:opacity-45">
+                    {t("plans.widget.pickDevices")}
+                  </button>
                   {draft.devices.length === 0 ? <span className="text-xs text-dim">—</span> : draft.devices.map((d) => (
                     <span key={d.name} className="inline-flex items-center gap-1.5 rounded-[2px] border border-line bg-white px-1.5 py-px text-xs">
                       <b className="font-mono font-semibold text-slate-800">{d.name}</b>
@@ -582,7 +613,7 @@ function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; p
         </div>
       </Card>
       {awaiting && draft && (
-        <div className="col-span-2">
+        <div className="xl:col-span-2">
           <ConfirmCard draft={draft} valid={!!valid?.ok} busy={saving || busy} errors={saveErr}
             onPatch={(patch) => patchDraft({ patch })} onDraft={(d) => patchDraft({ draft: d })} onSubmit={submit} />
         </div>
@@ -618,7 +649,7 @@ function ConfirmCard({ draft, valid, busy, errors, onPatch, onDraft, onSubmit }:
     <Card className="border-brand/50" >
       <div data-testid="confirm-card">
         <CardHead title={t("plans.confirm.title")} note={t("plans.confirm.note")} icon={<Icon d={PATH.shield} />} />
-        <div className="grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,0.9fr)]">
+        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,0.9fr)]">
           {col("commands", "plans.confirm.commands", (
             <div className="space-y-2">
               {byDevice.map(({ d, checks }) => (

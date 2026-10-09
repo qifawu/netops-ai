@@ -123,7 +123,7 @@ class TestChat(Tmp):
         self.assertEqual(len(r["quick_replies"]), 3)
         self.assertEqual(llm.calls, [])
         self.assertIn("4", r["reply"])  # 拓扑设备数
-        self.assertTrue(any(s["id"] == "start-core-agg" for s in r["suggestions"]))
+        self.assertEqual(r["widget"]["type"], "device_picker")  # 开场直接给设备选择气泡（代替原来「先从核心和汇聚开始」的建议卡）
 
     def test_正常多轮_草案补地址_模型看不到地址(self):
         llm = FakeLLM([_out(), _out(ready=True)])
@@ -230,10 +230,11 @@ class TestGraph(Tmp):
         g = build_graph(llm_factory=lambda: None, topology_loader=lambda: self.topo).compile().get_graph()
         self.assertEqual(set(g.nodes) - {"__start__", "__end__"},
                          {"route_intent", "opening", "list_plans", "load_plan", "gather_context", "lookup_commands", "propose",
-                          "validate", "repair", "respond", "respond_blocked", "rules_fallback", "confirm_plan", "save"})
+                          "validate", "repair", "respond", "respond_blocked", "rules_fallback", "confirm_plan", "save",
+                          "apply_selection"})
         edges = {(e.source, e.target, e.conditional) for e in g.edges}
         for src, dst in [("__start__", "route_intent"), ("opening", "__end__"), ("list_plans", "__end__"), ("load_plan", "__end__"),
-                         ("lookup_commands", "propose"), ("respond_blocked", "__end__")]:
+                         ("lookup_commands", "propose"), ("respond_blocked", "__end__"), ("apply_selection", "validate")]:
             self.assertIn((src, dst, False), edges, (src, dst))
         for src, dst in [("route_intent", "opening"), ("route_intent", "list_plans"), ("route_intent", "load_plan"),
                          ("route_intent", "gather_context"), ("gather_context", "lookup_commands"), ("gather_context", "propose"),
@@ -241,10 +242,11 @@ class TestGraph(Tmp):
                          ("validate", "respond_blocked"), ("repair", "validate"), ("repair", "rules_fallback"),
                          ("respond", "confirm_plan"), ("respond", "__end__"), ("rules_fallback", "confirm_plan"),
                          ("rules_fallback", "__end__"), ("confirm_plan", "save"), ("confirm_plan", "propose"),
-                         ("confirm_plan", "gather_context"), ("save", "__end__"), ("save", "confirm_plan")]:
+                         ("confirm_plan", "gather_context"), ("save", "__end__"), ("save", "confirm_plan"),
+                         ("route_intent", "apply_selection"), ("confirm_plan", "apply_selection")]:
             self.assertIn((src, dst, True), edges, (src, dst))
         m = g.draw_mermaid()
-        for n in ("route_intent", "lookup_commands", "confirm_plan"):
+        for n in ("route_intent", "lookup_commands", "confirm_plan", "apply_selection"):
             self.assertIn(n, m)
 
     def test_修正环_一次修好(self):

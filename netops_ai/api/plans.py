@@ -33,6 +33,15 @@ class PlanChatRequest(BaseModel):
     #: new = 新建计划；edit = 调整现有计划（`plan` 是网页上点「调整」的那个计划名，不给就先列出已有计划让用户挑）
     mode: Literal["new", "edit"] = "new"
     plan: str = Field(default="", max_length=64)
+    #: 用户在选择气泡里提交的选择：{widget_id, type: device_picker|schedule_picker|check_picker, value}。走确定性路径，不调模型
+    selection: dict[str, Any] | None = None
+
+
+class PlanWidgetRequest(BaseModel):
+    session: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    type: Literal["device_picker", "schedule_picker", "check_picker"]
+    draft: dict[str, Any] | None = None
+    lang: Literal["zh", "en"] = "zh"
 
 
 class PlanConfirmRequest(BaseModel):
@@ -106,8 +115,18 @@ def api_plan_chat(body: PlanChatRequest) -> JSONResponse:
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"message": f"拓扑读不到：{type(exc).__name__}: {exc}"}, status_code=503)
     session = body.session or new_session_id()
-    out = _conversation().chat(session, [m.model_dump() for m in body.messages], body.draft, body.lang, mode=body.mode, plan=body.plan)
+    out = _conversation().chat(session, [m.model_dump() for m in body.messages], body.draft, body.lang, mode=body.mode, plan=body.plan,
+                               selection=body.selection)
     return JSONResponse(out)
+
+
+@router.post("/widget")
+def api_plan_widget(body: PlanWidgetRequest) -> JSONResponse:
+    """用户主动重新打开一个选择气泡（草案预览里「选择设备」、已提交气泡上的「修改」）。新气泡成为唯一能提交的那个。"""
+    try:
+        return JSONResponse(_conversation().open_widget(body.session, body.type, body.draft, body.lang, topology=_topology()))
+    except P.PlanError as exc:
+        return _err(exc)
 
 
 @router.post("/confirm")

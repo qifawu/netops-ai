@@ -3,7 +3,8 @@
 每一轮对话是图上的一次执行；保存前的「三项确认」是同一张图里的人工确认环节（`interrupt`），
 靠 checkpointer（默认 `MemorySaver`，thread_id = 对话会话 id）把图停在那里等用户：
 
-    START → route_intent ─┬─(新建，还没说话)→ opening → END
+    START → route_intent ─┬─(用户提交了选择气泡)→ apply_selection → validate → respond（确定性，不调模型）
+                          ├─(新建，还没说话)→ opening → END（带 device_picker）
                           ├─(调整，还没选计划)→ list_plans → END（列出已有计划让用户挑）
                           ├─(调整，选定了计划)→ load_plan → END（加载成草案，问要改什么）
                           └→ gather_context ─┬─(描述了想查什么却没给命令 / 说不记得命令)→ lookup_commands → propose
@@ -13,12 +14,14 @@
                           ├─(不过且 repairs<2)→ repair → validate（修正环）
                           ├─(不过且修正用尽)→ respond_blocked → END（如实告知、不放行）
                           └─(修正时模型不可用：repair → rules_fallback)
-    respond / rules_fallback ─┬─(可确认)→ confirm_plan
+    respond / rules_fallback ─┬─(草案还缺设备 / 周期 / 检查项)→ END（回复里带对应的选择气泡，等用户选）
+                              ├─(都不缺且可确认)→ confirm_plan
                               └→ END
     confirm_plan（interrupt：①命令 ②机器 ③周期 逐项确认）
              ├─(三项都确认)→ save ─┬→ END
              │                     └─(重名，改名后再确认)→ confirm_plan
              ├─(有一项没确认 / 要改)→ propose
+             ├─(用户在确认前又用气泡改了选择)→ apply_selection
              └─(用户直接继续聊)→ gather_context
 
 节点只做编排，逻辑都在 `netops_ai/inspection/` 下的纯函数里（plan_chat / plans / command_lookup）。
@@ -38,6 +41,7 @@ from langgraph.types import Command, interrupt
 
 from netops_ai.inspection import command_lookup as CMD
 from netops_ai.inspection import plan_chat as PC
+from netops_ai.inspection import plan_widgets as W
 from netops_ai.inspection import plans as P
 
 MAX_REPAIRS = PC.MAX_FIX_ROUNDS
@@ -75,6 +79,14 @@ class PlanState(TypedDict, total=False):
     problems: list[str]
     model_error: str
     removed: list[str]
+    # ---- 选择气泡 / 提示泡
+    selection: dict[str, Any] | None    # 这一轮用户提交的选择 {widget_id, type, value}
+    via_selection: bool                 # 这一轮走的是确定性的选择路径（没调模型）
+    selection_summary: str
+    widget: dict[str, Any] | None       # 这一轮回复带的选择气泡
+    live_widget: str                    # 当前唯一能提交的气泡 id（旧的一律拒收；不在每轮重置里）
+    hints: list[dict[str, str]]         # 这一轮新出的提示泡
+    hints_shown: list[str]              # 这个对话里出现过的提示（每条只出现一次；不在每轮重置里）
     # ---- 确认 / 保存
     confirm_card: dict[str, Any] | None
     saved: dict[str, Any] | None
@@ -87,6 +99,7 @@ _TURN_RESET: dict[str, Any] = {
     "model_out": None, "candidate": None, "problems": [], "model_error": "", "removed": [], "saved": None, "save_error": None,
     "validation": {"ok": False, "problems": [], "missing": []}, "route": "", "plans": [], "lookup": False, "candidates": [],
     "docs_status": "", "lookup_note": "", "confirm_card": None,
+    "selection": None, "via_selection": False, "selection_summary": "", "widget": None, "hints": [],
 }
 
 
@@ -136,7 +149,9 @@ def build_graph(*, llm_factory: Callable[[], Any] | None = None,
             wanted = next((n for n in sorted(names, key=len, reverse=True)
                            if re.search(rf"(?<![\w.-]){re.escape(n)}(?![\w.-])", text)), "")
         has_draft = bool(draft.get("devices") or draft.get("checks"))
-        if mode == "edit" and not editing:
+        if state.get("selection"):
+            route = "apply_selection"
+        elif mode == "edit" and not editing:
             route = "load_plan" if wanted in names else "list_plans"
         elif mode == "new" and not has_draft and wanted in names and _EDIT_WORDS.search(text or ""):
             route, mode = "load_plan", "edit"  # 新建面板里说「调整 core-health」：转到调整路径
@@ -149,7 +164,7 @@ def build_graph(*, llm_factory: Callable[[], Any] | None = None,
 
     def opening(state: PlanState) -> dict:
         """新建、还没有用户消息：固定开场白（不调模型），带快捷回复。"""
-        return _turn_view(PC.opening(_topo(), state.get("draft"), state["lang"]))
+        return _ui(state, _turn_view(PC.opening(_topo(), state.get("draft"), state["lang"])), _topo(), opening=True)
 
     def list_plans(state: PlanState) -> dict:
         """调整现有计划、还没选：列出已有计划（名字、设备、检查项、周期、启用、最近结果）让用户挑。"""
@@ -161,7 +176,20 @@ def build_graph(*, llm_factory: Callable[[], Any] | None = None,
     def load_plan(state: PlanState) -> dict:
         """把选中的计划加载成草案，说明它现在的样子，问要改什么。"""
         draft = P.load_as_draft(state["plan"])
-        return {**_turn_view(PC.loaded_plan_turn(draft, _topo(), state["lang"])), "editing": draft["name"], "mode": "edit"}
+        return {**_ui(state, _turn_view(PC.loaded_plan_turn(draft, _topo(), state["lang"])), _topo()), "editing": draft["name"], "mode": "edit"}
+
+    # ------------------------------------------------------------------ 选择气泡回传（确定性，不调模型）
+    def apply_selection(state: PlanState) -> dict:
+        """用户在气泡里选完：校验（设备在拓扑里、模板在模板库里、周期合法、只认最新那个气泡）后写进草案。"""
+        sel = state.get("selection") or {}
+        zh = state.get("lang", "zh") != "en"
+        if not sel.get("widget_id") or sel.get("widget_id") != state.get("live_widget"):
+            problems = ["this picker is out of date; use the latest one" if not zh else "这个选择框已经过期了，请用最新的那个"]
+            return {"via_selection": True, "candidate": state.get("draft") or P.empty_draft(), "problems": problems,
+                    "selection_summary": ""}
+        new, problems, summary = W.apply_selection(state.get("draft"), sel, _topo(), state.get("lang", "zh"))
+        # 气泡用过一次就作废（选错了被拒也一样：respond 会按缺口重新给一个新的）
+        return {"via_selection": True, "candidate": new, "problems": problems, "selection_summary": summary, "live_widget": ""}
 
     # ------------------------------------------------------------------ 提案 / 校验
     def gather_context(state: PlanState) -> dict:
@@ -184,7 +212,9 @@ def build_graph(*, llm_factory: Callable[[], Any] | None = None,
         return {"model_out": out, "llm_messages": convo}
 
     def validate(state: PlanState) -> dict:
-        """模板展开、补地址，再过 `check_draft`（格式 + 只读白名单）。"""
+        """模板展开、补地址，再过 `check_draft`（格式 + 只读白名单）。选择路径上只校验 apply_selection 给的草案。"""
+        if state.get("via_selection"):
+            return {"problems": (state.get("problems") or []) + P.check_draft(state.get("candidate"))["problems"]}
         out = dict(state["model_out"])
         if state.get("editing"):
             out["plan_name"] = state["editing"]  # 调整现有计划：名字不变（存回同一个文件）
@@ -201,13 +231,16 @@ def build_graph(*, llm_factory: Callable[[], Any] | None = None,
         return {"model_out": out, "llm_messages": convo, "repairs": state.get("repairs", 0) + 1}
 
     def respond(state: PlanState) -> dict:
-        """校验通过：整理回复、合并建议（模型的 + 规则的）、算 ready。"""
-        return _with_lookup(state, PC.finish_turn(state["model_out"], state["candidate"], [], state.get("repairs", 0), _topo(), state["lang"]))
+        """校验通过：整理回复、合并建议、算 ready；草案还缺设备 / 周期 / 检查项就附上对应的选择气泡。"""
+        if state.get("via_selection"):
+            return _ui(state, _selection_turn(state, _topo()), _topo())
+        return _ui(state, _with_lookup(state, PC.finish_turn(state["model_out"], state["candidate"], [], state.get("repairs", 0),
+                                                             _topo(), state["lang"])), _topo())
 
     def respond_blocked(state: PlanState) -> dict:
         """修正用尽仍不过：问题原样告诉用户，坏检查项从草案拿掉，ready=False，不进确认环节。"""
-        return _with_lookup(state, PC.finish_turn(state["model_out"], state["candidate"], state["problems"], state.get("repairs", 0),
-                                                  _topo(), state["lang"]))
+        return _ui(state, _with_lookup(state, PC.finish_turn(state["model_out"], state["candidate"], state["problems"],
+                                                             state.get("repairs", 0), _topo(), state["lang"])), _topo())
 
     def rules_fallback(state: PlanState) -> dict:
         """模型不可用：规则推荐（按角色挑模板 + 默认周期），明确说明是规则推荐；草案可以手工确认。"""
@@ -215,10 +248,10 @@ def build_graph(*, llm_factory: Callable[[], Any] | None = None,
         out = PC.rule_turn(state["messages"], base, _topo(), state["lang"], state.get("model_error") or "-")
         if state.get("editing") and base:
             out["draft"]["name"] = state["editing"]
-        return _with_lookup(state, out)
+        return _ui(state, _with_lookup(state, out), _topo())
 
     # ------------------------------------------------------------------ 确认 / 保存
-    def confirm_plan(state: PlanState) -> Command[Literal["save", "propose", "gather_context"]]:
+    def confirm_plan(state: PlanState) -> Command[Literal["save", "propose", "gather_context", "apply_selection"]]:
         """保存前的三项确认（人工中断）：①每台设备要执行的只读命令 ②实施机器 ③实施周期。
         恢复：`{action: "confirm", confirmed: {commands, devices, schedule}, draft}` 三项都 True → save；
         有一项不是 True → 回 propose 继续对话；`{action: "chat", messages, draft}` → 回到 gather_context。"""
@@ -227,6 +260,9 @@ def build_graph(*, llm_factory: Callable[[], Any] | None = None,
         decision = decision if isinstance(decision, dict) else {}
         draft = decision.get("draft") or state.get("draft")
         lang = decision.get("lang") or state.get("lang", "zh")
+        if decision.get("action") == "select":  # 确认前又在气泡里改了选择
+            return Command(goto="apply_selection", update={**_TURN_RESET, "selection": decision.get("selection"), "draft": draft,
+                                                           "lang": lang, "messages": PC._clean_messages(decision.get("messages") or state.get("messages") or [])})
         if decision.get("action") == "confirm":
             confirmed = decision.get("confirmed") or {}
             pending = [k for k in CONFIRM_ITEMS if confirmed.get(k) is not True]
@@ -265,6 +301,8 @@ def build_graph(*, llm_factory: Callable[[], Any] | None = None,
         return "rules_fallback" if state.get("model_error") else "validate"
 
     def after_validate(state: PlanState) -> str:
+        if state.get("via_selection"):
+            return "respond"  # 选择路径不让模型修，问题直接告诉用户
         if not state.get("problems"):
             return "respond"
         return "repair" if state.get("repairs", 0) < MAX_REPAIRS else "respond_blocked"
@@ -273,6 +311,8 @@ def build_graph(*, llm_factory: Callable[[], Any] | None = None,
         return "rules_fallback" if state.get("model_error") else "validate"
 
     def after_respond(state: PlanState) -> str:
+        if state.get("widget"):
+            return END  # 还缺东西：等用户在气泡里选
         return "confirm_plan" if state.get("ready") and (state.get("validation") or {}).get("ok") else END
 
     def after_save(state: PlanState) -> str:
@@ -285,9 +325,11 @@ def build_graph(*, llm_factory: Callable[[], Any] | None = None,
                      ("validate", validate), ("repair", repair), ("respond", respond), ("respond_blocked", respond_blocked),
                      ("rules_fallback", rules_fallback), ("save", save)):
         g.add_node(name, fn)
-    g.add_node("confirm_plan", confirm_plan, destinations=("save", "propose", "gather_context"))
+    g.add_node("apply_selection", apply_selection)
+    g.add_node("confirm_plan", confirm_plan, destinations=("save", "propose", "gather_context", "apply_selection"))
     g.add_edge(START, "route_intent")
-    g.add_conditional_edges("route_intent", after_route, ["opening", "list_plans", "load_plan", "gather_context"])
+    g.add_conditional_edges("route_intent", after_route, ["opening", "list_plans", "load_plan", "gather_context", "apply_selection"])
+    g.add_edge("apply_selection", "validate")
     for n in ("opening", "list_plans", "load_plan", "respond_blocked"):
         g.add_edge(n, END)
     g.add_conditional_edges("gather_context", after_context, ["lookup_commands", "propose"])
@@ -307,6 +349,39 @@ def _unconfirmed_message(pending: list[str], lang: str, note: str) -> str:
     items = ("、".join(label[k][0] for k in pending)) if zh else ", ".join(label[k][1] for k in pending)
     head = f"我还没确认：{items}，要改一下。" if zh else f"I have not confirmed {items} yet; I want to change it."
     return head + (f" {note}" if note else "")
+
+
+def _ui(state: PlanState, out: dict, topology: dict[str, Any], *, opening: bool = False) -> dict:
+    """给这一轮回复附上选择气泡（草案缺什么给什么）和提示泡（每条每个对话只出现一次）。"""
+    lang = state.get("lang", "zh")
+    draft = out.get("draft") or state.get("draft") or {}
+    widget = W.widget_for_gap(draft, topology, lang)
+    hints = W.hints_for(draft, lang, shown=state.get("hints_shown") or [], opening=opening)
+    out = {**out, "widget": widget, "hints": hints, "hints_shown": [*(state.get("hints_shown") or []), *(h["id"] for h in hints)]}
+    if widget:
+        out["live_widget"] = widget["id"]
+        out["ready"] = False
+        out["suggestions"] = []  # 有选择气泡时它就是这一步要做的事，建议卡先不出，免得两套入口抢着点
+    return out
+
+
+def _selection_turn(state: PlanState, topology: dict[str, Any]) -> dict:
+    """选择路径的回复：确定性的摘要 + 下一步该选什么；没缺口且校验通过就是 ready（进确认卡）。"""
+    lang = state.get("lang", "zh")
+    problems = state.get("problems") or []
+    if problems:
+        draft = state.get("draft") or P.empty_draft()
+        zh = lang != "en"
+        reply = ("这次选择没有生效：" if zh else "That selection was not applied: ") + "；".join(problems)
+        return {"reply": reply, "draft": draft, "validation": {**P.check_draft(draft), "ok": False, "problems": problems},
+                "ready": False, "suggestions": [], "quick_replies": [], "source": "selection", "repairs": 0}
+    clean, removed = P.sanitize(state["candidate"])
+    v = P.check_draft(clean)
+    reply = f"{state.get('selection_summary', '')}。{W.next_prompt(clean, lang)}" if lang != "en" else \
+        f"{state.get('selection_summary', '')}. {W.next_prompt(clean, lang)}"
+    return {"reply": reply, "draft": clean, "validation": v, "ready": v["ok"] and W.next_gap(clean) is None,
+            "suggestions": PC.merge_suggestions([], clean, topology, lang), "quick_replies": [], "source": "selection",
+            "repairs": 0, "removed": removed}
 
 
 def _turn_view(turn: dict[str, Any]) -> dict:
@@ -329,8 +404,16 @@ class PlanConversation:
 
     def __init__(self, *, llm_factory: Callable[[], Any] | None = None, topology_loader: Callable[[], dict[str, Any]] | None = None,
                  docs_db: Callable[[], str | Path | None] | None = None, checkpointer: Any = None) -> None:
+        self._topology_loader = topology_loader
         self.graph = build_graph(llm_factory=llm_factory, topology_loader=topology_loader, docs_db=docs_db).compile(
             checkpointer=checkpointer if checkpointer is not None else MemorySaver())
+
+    def _topology(self) -> dict[str, Any]:
+        if self._topology_loader is not None:
+            return self._topology_loader()
+        from netops_ai.topology import load_topology
+
+        return load_topology()
 
     def _cfg(self, session: str) -> dict:
         return {"configurable": {"thread_id": session}}
@@ -339,13 +422,27 @@ class PlanConversation:
         return bool(self.graph.get_state(self._cfg(session)).next)
 
     def chat(self, session: str, messages: list[dict[str, str]], draft: dict[str, Any] | None, lang: str = "zh", *,
-             mode: str = "new", plan: str = "") -> dict:
+             mode: str = "new", plan: str = "", selection: dict[str, Any] | None = None) -> dict:
+        """一轮。`selection` 不为空 = 用户在选择气泡里提交了选择（走确定性路径，不调模型）。"""
         cfg = self._cfg(session)
-        if self.awaiting_confirm(session):  # 停在确认环节：用户没确认而是继续聊 → 从中断处恢复
-            self.graph.invoke(Command(resume={"action": "chat", "messages": messages, "draft": draft, "lang": lang}), cfg)
+        if self.awaiting_confirm(session):  # 停在确认环节：用户没确认而是继续聊 / 改选择 → 从中断处恢复
+            action = "select" if selection else "chat"
+            self.graph.invoke(Command(resume={"action": action, "selection": selection, "messages": messages, "draft": draft,
+                                              "lang": lang}), cfg)
         else:
-            self.graph.invoke({**_TURN_RESET, "messages": messages, "draft": draft, "lang": lang, "mode": mode, "plan": plan}, cfg)
+            self.graph.invoke({**_TURN_RESET, "messages": messages, "draft": draft, "lang": lang, "mode": mode, "plan": plan,
+                               "selection": selection}, cfg)
         return self.view(session)
+
+    def open_widget(self, session: str, kind: str, draft: dict[str, Any] | None, lang: str = "zh",
+                    topology: dict[str, Any] | None = None) -> dict:
+        """用户主动重新打开一个选择气泡（草案预览里的「选择设备」、已提交气泡上的「修改」）。它成为唯一能提交的那个。"""
+        widget = W.build_widget(kind, draft, topology if topology is not None else self._topology(), lang)
+        cfg = self._cfg(session)
+        if not self.graph.get_state(cfg).values:  # 面板打开时总会先跑一轮开场白，没有就是会话已过期
+            raise P.PlanError("this conversation has expired; send a message first", status=409)
+        self.graph.update_state(cfg, {"live_widget": widget["id"]})
+        return widget
 
     def confirm(self, session: str, draft: dict[str, Any] | None = None, confirmed: dict[str, bool] | None = None,
                 note: str = "", messages: list[dict[str, str]] | None = None) -> dict:
@@ -384,6 +481,8 @@ class PlanConversation:
             "lookup_note": v.get("lookup_note", ""),
             "awaiting_confirm": bool(snap.next),
             "confirm_card": card,
+            "widget": v.get("widget"),
+            "hints": v.get("hints") or [],
             "saved": v.get("saved"),
             "save_error": v.get("save_error"),
         }

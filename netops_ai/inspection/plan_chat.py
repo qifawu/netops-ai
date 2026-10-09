@@ -329,7 +329,8 @@ def merge_suggestions(model_items: list[dict[str, Any]], draft: dict[str, Any], 
     base = _essence(draft)
     cands = [{"id": P.slug(s.get("id"), f"s{i}"), "text": str(s.get("text") or "").strip(), "reason": str(s.get("reason") or "").strip(),
               "patch": _patch_from_model(s), "source": "llm"} for i, s in enumerate(model_items or []) if isinstance(s, dict)]
-    cands += [{**s, "source": "rules"} for s in P.rule_suggestions(draft, topology, lang)]
+    # 规则里没有 patch 的纯提醒（「趋势至少 3 次运行」）改由提示泡承担，建议卡里不再重复
+    cands += [{**s, "source": "rules"} for s in P.rule_suggestions(draft, topology, lang) if s.get("patch")]
     for s in cands:
         if not s["text"] or s["id"] in seen_ids:
             continue
@@ -374,11 +375,11 @@ def opening(topology: dict[str, Any], draft: dict[str, Any] | None, lang: str) -
              for r, n in sorted(groups.items(), key=lambda kv: ("core", "aggregation", "access", "").index(kv[0]) if kv[0] in ("core", "aggregation", "access", "") else 9)]
     if zh:
         reply = (f"你好，我来帮你制定一个只读巡检计划。拓扑里有 {len(topology)} 台设备：" + "，".join(parts) + "。"
-                 "\n先说说你最担心哪类问题？也可以直接点下面的选项，我会给出推荐的检查项和周期。")
+                 "\n可以先在下面勾选设备范围，也可以直接说说最担心哪类问题，我会给出推荐的检查项和周期。")
         quick = ["核心设备的邻居和路由", "接口错误增长", "CPU 和内存"]
     else:
         reply = (f"Hi — let's set up a read-only inspection plan. The topology has {len(topology)} devices: " + ", ".join(parts) + "."
-                 "\nWhat worries you most? You can also pick an option below and I'll propose checks and a schedule.")
+                 "\nPick the devices below, or just tell me what worries you most and I'll propose checks and a schedule.")
         quick = ["Neighbors and routing on the core", "Growing interface errors", "CPU and memory"]
     d = draft if draft and draft.get("devices") else P.empty_draft()
     d.setdefault("name", "")

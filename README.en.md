@@ -109,9 +109,13 @@ Every incident keeps the agent's investigation trace: which tool was called, wit
 
 ### Defining an inspection plan by conversation
 
-The assistant asks one or two key questions at a time and the draft with its validation status is updated live on the right; when the user forgets a command, the assistant lists candidate commands with their source and adds the chosen one to the draft.
+The assistant asks one or two key questions at a time and the draft with its validation status is updated live on the right. When a device scope, a schedule or checks have to be chosen, the assistant puts an interactive picker in the conversation (devices grouped by core, aggregation and access, with shortcuts such as “all core”); the selection bypasses the model and goes straight into the draft. Short hints appear below the bubbles (for example, “counter checks should not run more often than every 5 minutes”).
 
-<p align="center"><img src="docs/images/plan-chat-en.png" alt="defining a plan by conversation" width="900"></p>
+<p align="center"><img src="docs/images/plan-chat-en.png" alt="device scope picker" width="900"></p>
+
+For the checks, each one shows its purpose and the command it will run, with the recommended ones pre-selected for the device roles; when the user forgets a command, the assistant lists candidate commands with their source and adds the chosen one to the draft:
+
+<p align="center"><img src="docs/images/plan-checks-en.png" alt="check picker" width="900"></p>
 
 Before saving, the commands, the target machines and the schedule must each be confirmed:
 
