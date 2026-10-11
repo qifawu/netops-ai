@@ -240,6 +240,9 @@ def hints_for(draft: dict[str, Any] | None, lang: str = "zh", *, shown: list[str
     if counters:
         cands.append(("counter-interval", "计数类检查周期不要短于 5 分钟，否则看不出趋势。" if zh
                       else "Counter checks should not run more often than every 5 minutes, or no trend is visible."))
+    if d.get("devices") and d.get("schedule") and d.get("checks"):
+        cands.append(("dryrun", "确认前可以先点「试运行」：在设备上真的跑一遍这些只读命令，看看能不能跑通（不存记录）。" if zh
+                      else "Before confirming, try a dry run: it runs these read-only commands on the devices once to see that they work (nothing is stored)."))
     if d.get("schedule") and d.get("checks"):
         cands.append(("trend-runs", "趋势结论至少需要 3 次运行。" if zh else "A trend needs at least 3 runs."))
     out = [{"id": i, "text": t} for i, t in cands if i not in shown_set]

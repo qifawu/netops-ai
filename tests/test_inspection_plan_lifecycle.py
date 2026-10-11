@@ -283,5 +283,30 @@ class Lifecycle(unittest.TestCase):
         self.assertEqual([p["name"] for p in P.list_plans()], ["after"])
 
 
+class BuiltinRows(unittest.TestCase):
+    def test_内置巡检概况_全局周期和下次运行(self):
+        from netops_ai.api import dashboard, schedule
+        from netops_ai.api.app import app
+
+        latest = {"scanned_hosts": 9, "scanned_items": 100, "items_with_data": 90, "findings": [], "errors": [],
+                  "scanned_at": "2026-01-01 08:00:00 UTC"}
+        status = {"checked_at": "2026-01-01 08:00:05 UTC", "devices": [], "summary": {"devices": 7, "bad": 1, "warn": 0, "unreachable": 1}}
+        with mock.patch.object(dashboard, "_env", return_value={"SCHEDULE_INTERVAL_MINUTES": "60"}), \
+                mock.patch.object(dashboard, "load_latest_inspection", return_value=latest), \
+                mock.patch.object(dashboard, "load_latest_status", return_value=status), \
+                mock.patch.object(schedule, "load_state", return_value={"at": "2026-01-01T08:00:00+00:00", "jobs": {"inspection": {"ok": True}}}):
+            r = TestClient(app).get("/api/inspection/builtin").json()
+        self.assertEqual((r["interval_minutes"], r["enabled"]), (60, True))
+        self.assertEqual(r["next_run_at"], "2026-01-01T09:00:00+00:00")
+        rows = {x["key"]: x for x in r["rows"]}
+        self.assertEqual(rows["trend"]["summary"]["scanned_hosts"], 9)
+        self.assertEqual(rows["trend"]["last_run_at"], "2026-01-01 08:00:00 UTC")
+        self.assertEqual(rows["status"]["summary"]["unreachable"], 1)
+        with mock.patch.object(dashboard, "_env", return_value={}), mock.patch.object(dashboard, "load_latest_inspection", return_value=None), \
+                mock.patch.object(schedule, "load_state", return_value=None):
+            r = TestClient(app).get("/api/inspection/builtin").json()
+        self.assertEqual((r["enabled"], r["next_run_at"]), (False, None))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -6,6 +6,8 @@ import { Btn, call } from "../lib/sopui";
 import Md from "../lib/Md";
 import Spark from "../lib/Spark";
 import { CheckPicker, DevicePicker, Hints, ScheduleChips, WidgetSummary, type Hint, type Selection, type Widget } from "./PlanWidgets";
+import DryRunPanel, { useDryRun } from "./DryRunPanel";
+import HelpTip from "../lib/HelpTip";
 
 /** 巡检计划：列表 + 对话式制定（聊天流 + 实时草案预览）+ 单个计划的运行历史 / 指标迷你趋势 / 趋势分析。
  *  草案的真源在后端：每一轮对话、每次「采纳」、每次改周期都回后端重新校验（含只读白名单），前端只负责展示。
@@ -39,6 +41,11 @@ type RunSum = { run_id: string; started_at: string; pass: number; fail: number; 
 type PlanRow = Draft & { enabled: boolean; device_count: number; check_count: number; last_run: RunSum | null; next_run_at: string | null; running: boolean };
 type RunCheck = { id: string; command: string; status: string; severity?: string; detail?: string; metrics?: Record<string, number | null>; evaluations?: (Expect & { passed: boolean })[]; output?: string };
 type Run = RunSum & { devices: { name: string; error: string; checks: RunCheck[] }[] };
+/** 两类内置（预设）巡检：趋势巡检（读 Zabbix 历史）、状态巡检（登设备做固定四项只读检查）。全局周期驱动，只读展示。 */
+type Builtin = {
+  interval_minutes: number; enabled: boolean; next_run_at: string | null;
+  rows: { key: "trend" | "status"; last_run_at: string | null; ok: boolean | null; summary: Record<string, number> }[];
+};
 type DeletePreview = { name: string; plan_file: string; history_dir: string; history_count: number; trend_file: string; running: boolean };
 type Trend = { runs: number; table: string; enough_runs: boolean; llm: boolean; analysis?: string; error?: string; messages?: { role: string; content: string }[] };
 
@@ -97,7 +104,7 @@ function SchedulePicker({ value, onChange, small }: { value?: Sched; onChange: (
   const t = useT();
   const v = value ?? {};
   const preset = v.daily_at ? "daily" : v.every_minutes ? String(v.every_minutes) : "";
-  const cls = cn("rounded-[3px] border border-line bg-white px-2 font-mono text-[12.5px] focus:border-brand focus:outline-none", small ? "py-[2px]" : "py-1");
+  const cls = cn("rounded-[3px] border border-line bg-white px-2 font-mono text-[0.78125rem] focus:border-brand focus:outline-none", small ? "py-[2px]" : "py-1");
   return (
     <span className="inline-flex items-center gap-1.5">
       <select data-testid="schedule-select" value={preset} className={cls}
@@ -118,10 +125,12 @@ function SchedulePicker({ value, onChange, small }: { value?: Sched; onChange: (
 
 // ---------------------------------------------------------------------------------------- 页面
 
-export default function InspectionPlans() {
+export default function InspectionPlans({ onShowBuiltin, seed = 0 }: { onShowBuiltin?: () => void; seed?: number }) {
   const t = useT();
   const [rows, setRows] = useState<PlanRow[] | null>(null);
-  const [building, setBuilding] = useState<{ mode: "new" | "edit"; plan: string; key: number } | null>(null);
+  const [builtin, setBuiltin] = useState<Builtin | null>(null);
+  const [builtinRunning, setBuiltinRunning] = useState(false);
+  const [building, setBuilding] = useState<{ mode: "new" | "edit"; plan: string; key: number; seed?: "basic" } | null>(null);
   const [open, setOpen] = useState("");
   const [note, setNote] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
   const [trendFor, setTrendFor] = useState("");
@@ -133,7 +142,44 @@ export default function InspectionPlans() {
     setRows(list);
     return list;
   };
-  useEffect(() => { reload(); }, []);
+  /** 专注模式：对话打开时哈希写成 `#inspection?plans=new` / `=new:basic` / `=edit:<计划名>`，列表态是 `#inspection?plans`。
+   *  刷新时按哈希恢复到同一个模式（对话本身重新开始）。 */
+  const openBuilder = (b: { mode: "new" | "edit"; plan: string; seed?: "basic" }) => {
+    setBuilding({ ...b, key: Date.now() });
+    setNote(null);
+    const v = b.mode === "edit" ? `edit:${encodeURIComponent(b.plan)}` : b.seed ? "new:basic" : "new";
+    history.replaceState(null, "", `#inspection?plans=${v}`);
+    window.scrollTo({ top: 0 });
+  };
+  const closeBuilder = () => { setBuilding(null); history.replaceState(null, "", "#inspection?plans"); };
+  useEffect(() => {
+    const m = /[?&]plans=([^&]+)/.exec(location.hash);
+    if (!m || seed) return;
+    const v = decodeURIComponent(m[1]);
+    if (v.startsWith("edit:")) openBuilder({ mode: "edit", plan: decodeURIComponent(v.slice(5)) });
+    else if (v === "edit") openBuilder({ mode: "edit", plan: "" });
+    else openBuilder({ mode: "new", plan: "", seed: v === "new:basic" ? "basic" : undefined });
+  }, []);
+  // 从基础巡检页点「以基础巡检为起点」：直接打开预置好检查项的新建对话
+  useEffect(() => { if (seed) openBuilder({ mode: "new", plan: "", seed: "basic" }); }, [seed]);
+  const reloadBuiltin = () => call<Builtin>("GET", "/api/inspection/builtin").then((r) => { if (r.ok) setBuiltin(r.data); return r.data; });
+  useEffect(() => { reload(); reloadBuiltin(); }, []);
+  /** 内置巡检的「立即运行」：两类一起跑（同一个后台任务），轮询到两边的时间都变了为止。 */
+  const runBuiltin = async () => {
+    const before = builtin?.rows.map((r) => r.last_run_at).join("|");
+    setBuiltinRunning(true);
+    try {
+      const r = await call("POST", "/api/inspection/run");
+      if (!r.ok) return;
+      for (let i = 0; i < 90; i++) {
+        await new Promise((ok) => setTimeout(ok, 2000));
+        const x = await reloadBuiltin();
+        if (x && x.rows.map((r) => r.last_run_at).join("|") !== before && x.rows.every((r) => r.last_run_at)) return;
+      }
+    } finally {
+      setBuiltinRunning(false);
+    }
+  };
   // 有计划在跑就每 2 秒刷新一次，跑完自动停
   useEffect(() => {
     if (!rows?.some((r) => r.running)) return;
@@ -154,28 +200,44 @@ export default function InspectionPlans() {
     setTimeout(reload, 800);
   };
 
+  if (building) {
+    // 专注模式：只有对话 + 草案（含试运行）+ 确认卡；保存或关闭后回到列表
+    return (
+      <div className="space-y-3" data-testid="plan-focus">
+        <div className="flex flex-wrap items-center gap-3">
+          <button onClick={closeBuilder} data-testid="back-to-list"
+            className="inline-flex items-center gap-1 rounded-[3px] border border-line bg-card px-2.5 py-1 text-[0.8125rem] text-slate-700 transition hover:border-brand hover:text-brand">
+            ← {t("plans.backToList")}
+          </button>
+          <span className="text-[0.8125rem] font-semibold text-slate-800">
+            {building.mode === "edit" ? (building.plan ? fill(t("plans.chat.titleEdit"), { name: building.plan }) : t("plans.adjustExisting"))
+              : building.seed ? t("basic.startCustom") : t("plans.new")}
+          </span>
+        </div>
+        <PlanBuilder key={building.key} mode={building.mode} plan={building.plan} seed={building.seed} onClose={closeBuilder}
+          onSaved={(name) => { closeBuilder(); setNote({ tone: "ok", text: fill(t("plans.saved"), { name }) }); setOpen(name); reload(); }} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4" data-testid="inspection-plans">
-      <div className="flex flex-wrap items-center gap-3">
-        <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-slate-600">{t("plans.intro")}</p>
-        {(rows?.length ?? 0) > 0 && <Btn onClick={() => { setBuilding({ mode: "edit", plan: "", key: Date.now() }); setNote(null); }}>{t("plans.adjustExisting")}</Btn>}
-        <Btn tone="brand" onClick={() => { setBuilding({ mode: "new", plan: "", key: Date.now() }); setNote(null); }}>{t("plans.new")}</Btn>
+      <div className="flex flex-wrap items-center gap-3" data-testid="custom-note">
+        {onShowBuiltin && <button onClick={onShowBuiltin} className="text-xs font-medium text-brand hover:underline">{t("plans.toBasic")}</button>}
+        <span className="flex-1" />
+        {(rows?.length ?? 0) > 0 && <Btn onClick={() => openBuilder({ mode: "edit", plan: "" })}>{t("plans.adjustExisting")}</Btn>}
+        <Btn tone="brand" onClick={() => openBuilder({ mode: "new", plan: "" })}>{t("plans.new")}</Btn>
       </div>
       {note && (
         <div className={cn("rounded-[3px] px-4 py-2.5 text-sm ring-1", note.tone === "ok" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-rose-50 text-rose-700 ring-rose-200")}>{note.text}</div>
       )}
-      {building && (
-        <PlanBuilder key={building.key} mode={building.mode} plan={building.plan} onClose={() => setBuilding(null)}
-          onSaved={(name) => { setBuilding(null); setNote({ tone: "ok", text: fill(t("plans.saved"), { name }) }); setOpen(name); reload(); }} />
-      )}
 
       <Card>
-        <CardHead title={t("plans.list.title")} icon={<Icon d={PATH.clock} />} right={rows && <span className="num text-xs text-dim">{rows.length}</span>} />
-        {rows === null ? <div className="h-20 animate-pulse bg-slate-100" /> : rows.length === 0 ? (
-          <Empty title={t("plans.list.empty")} hint={t("plans.list.emptyHint")} />
-        ) : (
+        <CardHead title={t("plans.list.title")} icon={<Icon d={PATH.clock} />}
+          right={rows && <span className="num text-xs text-dim">{rows.length + (builtin ? 2 : 0)}</span>} />
+        {rows === null ? <div className="h-20 animate-pulse bg-slate-100" /> : (
           <div className="overflow-x-auto">
-            <table className="w-full text-[13px]" data-testid="plans-table">
+            <table className="w-full text-[0.8125rem]" data-testid="plans-table">
               <thead>
                 <tr className="border-b border-line text-left text-xs text-dim">
                   {(["plans.col.name", "plans.col.devices", "plans.col.checks", "plans.col.schedule", "plans.col.enabled", "plans.col.last", "plans.col.next", "plans.col.actions"] as DictKey[]).map((k) => (
@@ -184,11 +246,60 @@ export default function InspectionPlans() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
+                {builtin?.rows.map((b) => (
+                  <tr key={b.key} className="bg-[#fafbfc] align-middle" data-testid={`preset-${b.key}`}>
+                    <td className="max-w-[300px] py-2 pr-3 pl-4">
+                      <div className="flex items-center gap-1.5">
+                        <Badge className="bg-white text-slate-600 ring-slate-300">{t("plans.preset")}</Badge>
+                        <span className="text-[0.8125rem] font-semibold text-slate-800">{t(b.key === "trend" ? "plans.preset.trend" : "plans.preset.status")}</span>
+                        <HelpTip text={t(b.key === "trend" ? "plans.preset.trend.desc" : "plans.preset.status.desc")} />
+                      </div>
+                    </td>
+                    <td className="num px-3 py-2">{b.key === "trend" ? (b.summary.scanned_hosts ?? "—") : (b.summary.devices ?? "—")}</td>
+                    <td className="px-3 py-2 text-xs text-slate-600">{t(b.key === "trend" ? "plans.preset.trend.checks" : "plans.preset.status.checks")}</td>
+                    <td className="px-3 py-2 text-xs whitespace-nowrap" title={t("plans.preset.globalHint")}>
+                      <button onClick={onShowBuiltin} className="text-slate-700 underline decoration-dotted underline-offset-2 hover:text-brand">
+                        {builtin.enabled ? fill(t("plans.preset.global"), { s: builtin.interval_minutes === 1440 ? t("basic.sched.daily") : schedText(t, { every_minutes: builtin.interval_minutes }) }) : t("plans.preset.off")}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2" title={t("plans.preset.globalHint")}>
+                      <span className={cn("relative inline-block h-4 w-7 rounded-[2px] opacity-60", builtin.enabled ? "bg-brand" : "bg-slate-300")} aria-label={t("plans.preset.readonly")}>
+                        <span className={cn("absolute top-[2px] h-3 w-3 rounded-[1px] bg-white", builtin.enabled ? "left-[14px]" : "left-[2px]")} />
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {builtinRunning ? <span className="flex items-center gap-1.5 text-xs text-brand"><span className="pulse-dot h-1.5 w-1.5 rounded-full bg-brand" />{t("plans.running")}</span>
+                        : b.last_run_at ? (
+                          <div className="leading-tight">
+                            {b.key === "trend"
+                              ? <span className="num text-xs text-slate-700">{fill(t("plans.preset.trend.result"), { n: b.summary.finding_count ?? 0 })}</span>
+                              : <span className="num inline-flex gap-x-2 text-xs">
+                                  {(b.summary.bad ?? 0) > 0 && <span className="font-semibold text-bad">{b.summary.bad} {t("inspection.state.bad")}</span>}
+                                  {(b.summary.warn ?? 0) > 0 && <span className="font-semibold text-warn">{b.summary.warn} {t("inspection.state.warn")}</span>}
+                                  {(b.summary.unreachable ?? 0) > 0 && <span className="font-semibold text-bad">{b.summary.unreachable} {t("plans.sum.unreachable")}</span>}
+                                  {!(b.summary.bad || b.summary.warn || b.summary.unreachable) && <span className="text-emerald-700">{t("inspection.status.allOk")}</span>}
+                                </span>}
+                            <div className="num text-[0.6875rem] text-dim">{when(b.last_run_at.replace(" UTC", "Z").replace(" ", "T"))}</div>
+                          </div>
+                        ) : <span className="text-xs text-dim">{t("plans.never")}</span>}
+                    </td>
+                    <td className="num px-3 py-2 text-xs whitespace-nowrap text-slate-600">{builtin.next_run_at ? when(builtin.next_run_at) : "—"}</td>
+                    <td className="px-3 py-2">
+                      <span className="flex gap-1.5">
+                        <Btn small busy={builtinRunning} disabled={builtinRunning} onClick={runBuiltin}>{t("plans.runNow")}</Btn>
+                        <Btn small onClick={onShowBuiltin}>{t("plans.preset.view")}</Btn>
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {rows.length === 0 && (
+                  <tr><td colSpan={8} className="px-4 py-6 text-center text-xs text-dim">{t("plans.list.empty")} — {t("plans.list.emptyHint")}</td></tr>
+                )}
                 {rows.map((p) => (
                   <Fragment key={p.name}>
                     <tr className={cn("align-middle", open === p.name && "bg-slate-50/70")}>
                       <td className="max-w-[260px] py-2 pr-3 pl-4">
-                        <button onClick={() => setOpen(open === p.name ? "" : p.name)} className="flex items-center gap-1.5 text-left font-mono text-[13px] font-semibold text-slate-800 hover:text-brand">
+                        <button onClick={() => setOpen(open === p.name ? "" : p.name)} className="flex items-center gap-1.5 text-left font-mono text-[0.8125rem] font-semibold text-slate-800 hover:text-brand">
                           <Icon d={PATH.chevron} className={cn("h-3.5 w-3.5 text-slate-400 transition", open === p.name && "rotate-90")} />
                           {p.name}
                         </button>
@@ -200,7 +311,7 @@ export default function InspectionPlans() {
                       <td className="px-3 py-2"><Toggle on={p.enabled} onChange={(v) => patch(p.name, { enabled: v })} /></td>
                       <td className="px-3 py-2 whitespace-nowrap">
                         {p.running ? <span className="flex items-center gap-1.5 text-xs text-brand"><span className="pulse-dot h-1.5 w-1.5 rounded-full bg-brand" />{t("plans.running")}</span>
-                          : p.last_run ? <div className="leading-tight"><RunCounts r={p.last_run} /><div className="num text-[11px] text-dim">{when(p.last_run.started_at)}</div></div>
+                          : p.last_run ? <div className="leading-tight"><RunCounts r={p.last_run} /><div className="num text-[0.6875rem] text-dim">{when(p.last_run.started_at)}</div></div>
                             : <span className="text-xs text-dim">{t("plans.never")}</span>}
                       </td>
                       <td className="num px-3 py-2 text-xs whitespace-nowrap text-slate-600">{p.enabled ? when(p.next_run_at) : <span className="text-dim">{t("plans.paused")}</span>}</td>
@@ -208,7 +319,7 @@ export default function InspectionPlans() {
                         <span className="flex gap-1.5">
                           <Btn small busy={p.running} disabled={p.running} onClick={() => runNow(p.name)}>{t("plans.runNow")}</Btn>
                           <Btn small onClick={() => { setOpen(p.name); setTrendFor(p.name + ":" + Date.now()); }}>{t("plans.trend")}</Btn>
-                          <Btn small onClick={() => { setBuilding({ mode: "edit", plan: p.name, key: Date.now() }); setNote(null); window.scrollTo({ top: 0 }); }}>{t("plans.adjust")}</Btn>
+                          <Btn small onClick={() => openBuilder({ mode: "edit", plan: p.name })}>{t("plans.adjust")}</Btn>
                           <button data-testid={`delete-${p.name}`} onClick={() => setDeleting(p.name)}
                             className="inline-flex items-center rounded-[3px] px-2 py-[3px] text-xs font-medium whitespace-nowrap text-bad ring-1 ring-[#c3cad2] ring-inset transition hover:bg-rose-50 hover:ring-rose-300">
                             {t("plans.delete")}
@@ -262,15 +373,15 @@ function DeleteDialog({ name, onClose, onDeleted }: { name: string; onClose: () 
       <div className="w-[560px] rounded-[4px] border border-line bg-card shadow-lg">
         <div className="flex items-center gap-2 border-b border-line bg-[#f6f7f9] px-4 py-2.5">
           <Icon d={PATH.trash} className="text-bad" />
-          <span className="text-[14px] font-semibold text-slate-800">{fill(t("plans.delete.title"), { name })}</span>
+          <span className="text-[0.875rem] font-semibold text-slate-800">{fill(t("plans.delete.title"), { name })}</span>
         </div>
-        <div className="space-y-3 px-4 py-3 text-[13px] text-slate-700">
+        <div className="space-y-3 px-4 py-3 text-[0.8125rem] text-slate-700">
           {!pv && !err && <div className="h-12 animate-pulse bg-slate-100" />}
           {pv && (
             <>
               <div>
                 <div className="text-xs font-medium text-slate-600">{t("plans.delete.willDelete")}</div>
-                <ul className="mt-1 list-disc space-y-0.5 pl-5 font-mono text-[12px]">
+                <ul className="mt-1 list-disc space-y-0.5 pl-5 font-mono text-[0.75rem]">
                   <li>{pv.plan_file}</li>
                   {withHistory && pv.history_count > 0 && <li>{fill(t("plans.delete.historyItem"), { dir: pv.history_dir, n: pv.history_count, name })}</li>}
                   {withHistory && pv.trend_file && <li>{pv.trend_file}</li>}
@@ -292,7 +403,7 @@ function DeleteDialog({ name, onClose, onDeleted }: { name: string; onClose: () 
         <div className="flex justify-end gap-2 border-t border-line px-4 py-3">
           <Btn onClick={onClose}>{t("plans.delete.cancel")}</Btn>
           <button data-testid="delete-confirm" disabled={!pv || pv.running || busy} onClick={go}
-            className="inline-flex items-center gap-1.5 rounded-[3px] bg-bad px-3 py-1.5 text-[13px] font-medium whitespace-nowrap text-white transition hover:bg-[#ad2424] disabled:cursor-not-allowed disabled:opacity-45">
+            className="inline-flex items-center gap-1.5 rounded-[3px] bg-bad px-3 py-1.5 text-[0.8125rem] font-medium whitespace-nowrap text-white transition hover:bg-[#ad2424] disabled:cursor-not-allowed disabled:opacity-45">
             {busy && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />}
             {t("plans.delete.confirm")}
           </button>
@@ -304,7 +415,7 @@ function DeleteDialog({ name, onClose, onDeleted }: { name: string; onClose: () 
 
 // ---------------------------------------------------------------------------------------- 对话面板
 
-function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; plan: string; onClose: () => void; onSaved: (name: string) => void }) {
+function PlanBuilder({ mode, plan, seed, onClose, onSaved }: { mode: "new" | "edit"; plan: string; seed?: "basic"; onClose: () => void; onSaved: (name: string) => void }) {
   const t = useT();
   const lang = useLang();
   const [msgs, setMsgs] = useState<Msg[]>([]);
@@ -321,6 +432,7 @@ function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; p
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [ifname, setIfname] = useState<Record<string, string>>({});
   const [closedHints, setClosedHints] = useState<Set<string>>(new Set());
+  const dryRun = useDryRun(draft);
   const scroller = useRef<HTMLDivElement>(null);
 
   const apply = (r: Turn) => {
@@ -346,6 +458,7 @@ function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; p
     const r = await call<Turn>("POST", "/api/inspection/plans/chat", {
       session: session.current, messages: history.filter((m) => m.source !== "opening" && m.source !== "widget").map((m) => ({ role: m.role, content: m.content })),
       draft: d, lang, mode, plan, selection: selection ?? null,
+      seed: history.length === 0 && !d ? seed ?? "" : "",  // 只在开场那一轮带上起点
     });
     setBusy(false);
     if (!r.ok) { setMsgs([...history, { role: "assistant", content: r.data.message || t("plans.chat.failed") }]); return; }
@@ -427,23 +540,23 @@ function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; p
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]" data-testid="plan-builder">
-      <Card className="flex h-[640px] flex-col">
+      <Card className="flex h-[640px] flex-col min-[1920px]:h-[780px] min-[2560px]:h-[900px]">
         <CardHead title={editing ? fill(t("plans.chat.titleEdit"), { name: editing }) : t(mode === "edit" ? "plans.adjustExisting" : "plans.chat.title")}
-          note={t("plans.chat.note")} icon={<Icon d={PATH.send} />}
+          icon={<Icon d={PATH.send} />}
           right={<Btn small onClick={onClose}>{t("plans.cancel")}</Btn>} />
         <div ref={scroller} className="flex-1 space-y-3 overflow-y-auto px-4 py-3" data-testid="plan-chat">
           {msgs.map((m, i) => m.hidden ? null : m.role === "user" ? (
             <div key={i} className="flex justify-end">
-              <div className="max-w-[85%] rounded-[3px] bg-steel-50 px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap text-slate-800 ring-1 ring-steel-200">{m.content}</div>
+              <div className="max-w-[85%] rounded-[3px] bg-steel-50 px-3 py-2 text-[0.8125rem] leading-relaxed whitespace-pre-wrap text-slate-800 ring-1 ring-steel-200">{m.content}</div>
             </div>
           ) : (
             <div key={i} className="max-w-[94%]">
-              <div className="mb-1 flex items-center gap-2 text-[11px] text-dim">
+              <div className="mb-1 flex items-center gap-2 text-[0.6875rem] text-dim">
                 <span className="font-semibold text-slate-600">{t("plans.chat.assistant")}</span>
                 {m.source === "rules" && <Badge className="bg-amber-50 text-amber-700 ring-amber-200">{t("plans.chat.rules")}</Badge>}
                 {(m.fix ?? 0) > 0 && <Badge className="bg-white text-slate-600 ring-slate-300">{fill(t("plans.chat.fixed"), { n: m.fix! })}</Badge>}
               </div>
-              <div className="rounded-[3px] border border-line bg-white px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap text-slate-800">{m.content}</div>
+              <div className="rounded-[3px] border border-line bg-white px-3 py-2 text-[0.8125rem] leading-relaxed whitespace-pre-wrap text-slate-800">{m.content}</div>
               <Hints hints={(m.hints ?? []).filter((h) => !closedHints.has(h.id))} onClose={(id) => setClosedHints((s) => new Set(s).add(id))} />
               {m.widget && (m.widgetDone
                 ? <WidgetSummary text={m.widgetDone} onEdit={() => reopen(m.widget!.type)} />
@@ -456,7 +569,7 @@ function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; p
                   {m.suggestions!.map((s) => (
                     <div key={s.id} className="flex items-start gap-3 border border-line border-l-2 border-l-brand bg-[#f7f9fa] px-3 py-2">
                       <div className="min-w-0 flex-1">
-                        <div className="text-[13px] font-medium text-slate-800">{s.text}</div>
+                        <div className="text-[0.8125rem] font-medium text-slate-800">{s.text}</div>
                         <div className="mt-0.5 text-xs leading-relaxed text-dim">{s.reason}</div>
                       </div>
                       {s.patch ? (
@@ -473,25 +586,25 @@ function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; p
                     <Icon d={PATH.search} className="h-3.5 w-3.5 text-slate-500" />
                     <span className="font-semibold text-slate-700">{t("plans.cand.title")}</span>
                   </div>
-                  {m.lookupNote && <div className="border-b border-line px-3 py-1.5 text-[11.5px] leading-relaxed text-slate-600">{m.lookupNote}</div>}
+                  {m.lookupNote && <div className="border-b border-line px-3 py-1.5 text-[0.71875rem] leading-relaxed text-slate-600">{m.lookupNote}</div>}
                   <div className="divide-y divide-line">
                     {(m.candidates ?? []).map((c) => {
                       const key = `${i}:${c.command}`;
                       return (
                         <div key={c.command} className={cn("flex items-start gap-3 px-3 py-2", !c.allowed && "bg-rose-50/40")}>
                           <div className="min-w-0 flex-1">
-                            <div className={cn("font-mono text-[12px] break-words", c.allowed ? "text-slate-800" : "text-slate-500 line-through")}>{c.command}</div>
+                            <div className={cn("font-mono text-[0.75rem] break-words", c.allowed ? "text-slate-800" : "text-slate-500 line-through")}>{c.command}</div>
                             {c.purpose && <div className="mt-0.5 text-xs text-slate-600">{c.purpose}</div>}
-                            <div className="mt-0.5 truncate text-[11px] text-dim" title={c.source}>
+                            <div className="mt-0.5 truncate text-[0.6875rem] text-dim" title={c.source}>
                               {t(c.origin === "docs" ? "plans.cand.docs" : "plans.cand.catalog")} · {c.source}
                             </div>
-                            {!c.allowed && <div className="mt-0.5 text-[11px] text-bad">{c.reason}</div>}
+                            {!c.allowed && <div className="mt-0.5 text-[0.6875rem] text-bad">{c.reason}</div>}
                           </div>
                           {c.allowed && (picked.has(key) ? <Badge className="mt-0.5 bg-white text-emerald-700 ring-slate-300">{t("plans.cand.picked")}</Badge> : (
                             <span className="flex shrink-0 items-center gap-1.5">
                               {c.needs_interface && (
                                 <input value={ifname[key] || ""} onChange={(e) => setIfname({ ...ifname, [key]: e.target.value })} placeholder={t("plans.cand.ifPlaceholder")}
-                                  className="w-[132px] rounded-[3px] border border-line px-1.5 py-[2px] font-mono text-[11.5px] focus:border-brand focus:outline-none" />
+                                  className="w-[132px] rounded-[3px] border border-line px-1.5 py-[2px] font-mono text-[0.71875rem] focus:border-brand focus:outline-none" />
                               )}
                               <Btn small disabled={i !== lastAssistant || busy || (c.needs_interface && !(ifname[key] || "").trim())} onClick={() => pick(i, c)}>{t("plans.cand.pick")}</Btn>
                             </span>
@@ -516,22 +629,22 @@ function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; p
           <textarea data-testid="plan-input" value={input} rows={2} placeholder={t("plans.chat.placeholder")}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(input); } }}
-            className="min-h-[44px] flex-1 resize-none rounded-[3px] border border-line bg-white px-3 py-2 text-[13px] leading-relaxed focus:border-brand focus:outline-none" />
+            className="min-h-[44px] flex-1 resize-none rounded-[3px] border border-line bg-white px-3 py-2 text-[0.8125rem] leading-relaxed focus:border-brand focus:outline-none" />
           <Btn tone="brand" disabled={busy || !input.trim()} onClick={() => send(input)}>{t("plans.chat.send")}</Btn>
         </div>
       </Card>
 
-      <Card className="flex h-[640px] flex-col">
+      <Card className="flex h-[640px] flex-col min-[1920px]:h-[780px] min-[2560px]:h-[900px]">
         <CardHead title={t("plans.draft.title")} icon={<Icon d={PATH.list} />}
           right={valid && (valid.ok ? <Badge className="bg-white text-emerald-700 ring-slate-300">✓ {t("plans.status.pass")}</Badge>
             : valid.problems.length ? <Badge className="bg-rose-50 text-rose-700 ring-rose-200">{t("plans.status.fail")}</Badge> : null)} />
         <div className="flex-1 space-y-4 overflow-y-auto px-4 py-3" data-testid="plan-draft">
           {!draft ? <div className="h-24 animate-pulse bg-slate-100" /> : (
             <>
-              <div className="grid grid-cols-[84px_minmax(0,1fr)] items-center gap-x-3 gap-y-2.5 text-[13px]">
+              <div className="grid grid-cols-[84px_minmax(0,1fr)] items-center gap-x-3 gap-y-2.5 text-[0.8125rem]">
                 <span className="text-xs font-medium text-slate-600">{t("plans.draft.name")}</span>
                 <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} onBlur={() => patchDraft({ draft })}
-                  className="w-full max-w-[280px] rounded-[3px] border border-line bg-white px-2 py-1 font-mono text-[12.5px] focus:border-brand focus:outline-none" />
+                  className="w-full max-w-[280px] rounded-[3px] border border-line bg-white px-2 py-1 font-mono text-[0.78125rem] focus:border-brand focus:outline-none" />
                 <span className="text-xs font-medium text-slate-600">{t("plans.draft.schedule")}</span>
                 <span><SchedulePicker value={draft.schedule} onChange={(s) => patchDraft({ draft: { ...draft, schedule: s } })} /></span>
                 <span className="self-start pt-0.5 text-xs font-medium text-slate-600">{t("plans.draft.devices")}</span>
@@ -569,10 +682,10 @@ function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; p
                         <tr key={c.id} className="align-top">
                           <td className="px-2 py-1.5">
                             <div className="font-medium break-words text-slate-800">{c.title || c.id}</div>
-                            <div className="mt-0.5 text-[11px] text-dim">{fill(t("plans.draft.rules"), { e: c.expect?.length ?? 0, m: c.extract?.length ?? 0 })}</div>
+                            <div className="mt-0.5 text-[0.6875rem] text-dim">{fill(t("plans.draft.rules"), { e: c.expect?.length ?? 0, m: c.extract?.length ?? 0 })}</div>
                           </td>
-                          <td className="px-2 py-1.5 font-mono text-[11.5px] leading-snug break-words text-slate-700">{c.command}</td>
-                          <td className="px-2 py-1.5 font-mono text-[11.5px] break-words text-slate-600">{c.devices ? c.devices.join(", ") : t("plans.draft.allDevices")}</td>
+                          <td className="px-2 py-1.5 font-mono text-[0.71875rem] leading-snug break-words text-slate-700">{c.command}</td>
+                          <td className="px-2 py-1.5 font-mono text-[0.71875rem] break-words text-slate-600">{c.devices ? c.devices.join(", ") : t("plans.draft.allDevices")}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -586,7 +699,7 @@ function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; p
                   {valid.problems.length > 0 ? (
                     <>
                       <div className="font-semibold">{t("plans.valid.bad")}</div>
-                      <ul className="mt-1 list-disc space-y-0.5 pl-4 font-mono text-[11.5px] break-words">{valid.problems.map((p, i) => <li key={i}>{p}</li>)}</ul>
+                      <ul className="mt-1 list-disc space-y-0.5 pl-4 font-mono text-[0.71875rem] break-words">{valid.problems.map((p, i) => <li key={i}>{p}</li>)}</ul>
                     </>
                   ) : valid.ok ? <div className="flex items-center gap-1.5 font-medium"><Icon d={PATH.shield} className="h-3.5 w-3.5" />{t("plans.valid.ok")}</div> : null}
                   {valid.missing.length > 0 && (
@@ -600,8 +713,11 @@ function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; p
               {saveErr && (
                 <div className="rounded-[3px] bg-rose-50 px-3 py-2 text-xs text-rose-800 ring-1 ring-rose-200">
                   <div className="font-semibold">{saveErr[0]}</div>
-                  <ul className="mt-1 list-disc pl-4 font-mono text-[11.5px] break-words">{saveErr.slice(1).map((p, i) => <li key={i}>{p}</li>)}</ul>
+                  <ul className="mt-1 list-disc pl-4 font-mono text-[0.71875rem] break-words">{saveErr.slice(1).map((p, i) => <li key={i}>{p}</li>)}</ul>
                 </div>
+              )}
+              {draft.devices.length > 0 && draft.checks.length > 0 && (
+                <DryRunPanel dry={dryRun.dry} stale={dryRun.stale} onStart={dryRun.start} onCancel={dryRun.cancel} disabled={busy} />
               )}
             </>
           )}
@@ -615,6 +731,7 @@ function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; p
       {awaiting && draft && (
         <div className="xl:col-span-2">
           <ConfirmCard draft={draft} valid={!!valid?.ok} busy={saving || busy} errors={saveErr}
+            dryDone={!!dryRun.dry?.result && !dryRun.stale} dryRunning={dryRun.dry?.state === "running"} onDryRun={dryRun.start}
             onPatch={(patch) => patchDraft({ patch })} onDraft={(d) => patchDraft({ draft: d })} onSubmit={submit} />
         </div>
       )}
@@ -624,8 +741,8 @@ function PlanBuilder({ mode, plan, onClose, onSaved }: { mode: "new" | "edit"; p
 
 /** 保存前的三项确认：①每台设备要执行的只读命令 ②实施机器 ③实施周期。每栏都能改，改了那一栏要重新勾确认；
  *  三项都勾上才能启用。点「还要改」= 带着没勾的那几项回到对话。 */
-function ConfirmCard({ draft, valid, busy, errors, onPatch, onDraft, onSubmit }: {
-  draft: Draft; valid: boolean; busy: boolean; errors: string[] | null;
+function ConfirmCard({ draft, valid, busy, errors, dryDone, dryRunning, onDryRun, onPatch, onDraft, onSubmit }: {
+  draft: Draft; valid: boolean; busy: boolean; errors: string[] | null; dryDone: boolean; dryRunning: boolean; onDryRun: () => void;
   onPatch: (patch: unknown) => void; onDraft: (d: Draft) => void; onSubmit: (c: Confirmed) => void;
 }) {
   const t = useT();
@@ -635,11 +752,11 @@ function ConfirmCard({ draft, valid, busy, errors, onPatch, onDraft, onSubmit }:
   const paused = draft.enabled === false;
   const col = (col: keyof Confirmed, title: DictKey, children: ReactNode) => (
     <div className={cn("flex min-w-0 flex-col border-line", col !== "schedule" && "border-r")}>
-      <label className={cn("flex cursor-pointer items-center gap-2 border-b border-line px-3 py-2 text-[13px] font-semibold",
+      <label className={cn("flex cursor-pointer items-center gap-2 border-b border-line px-3 py-2 text-[0.8125rem] font-semibold",
         ok[col] ? "bg-emerald-50 text-emerald-800" : "bg-[#f6f7f9] text-slate-800")}>
         <input type="checkbox" data-testid={`confirm-${col}`} checked={ok[col]} onChange={(e) => setOk({ ...ok, [col]: e.target.checked })} className="accent-[#0f5c7a]" />
         {t(title)}
-        <span className="ml-auto text-[11px] font-normal text-dim">{ok[col] ? t("plans.confirm.done") : t("plans.confirm.tick")}</span>
+        <span className="ml-auto text-[0.6875rem] font-normal text-dim">{ok[col] ? t("plans.confirm.done") : t("plans.confirm.tick")}</span>
       </label>
       <div className="max-h-[260px] flex-1 overflow-y-auto px-3 py-2">{children}</div>
     </div>
@@ -648,18 +765,18 @@ function ConfirmCard({ draft, valid, busy, errors, onPatch, onDraft, onSubmit }:
   return (
     <Card className="border-brand/50" >
       <div data-testid="confirm-card">
-        <CardHead title={t("plans.confirm.title")} note={t("plans.confirm.note")} icon={<Icon d={PATH.shield} />} />
+        <CardHead title={t("plans.confirm.title")} right={<HelpTip text={t("plans.confirm.note")} />} icon={<Icon d={PATH.shield} />} />
         <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,0.9fr)]">
           {col("commands", "plans.confirm.commands", (
             <div className="space-y-2">
               {byDevice.map(({ d, checks }) => (
                 <div key={d.name}>
                   <div className="font-mono text-xs font-semibold text-slate-800">{d.name}</div>
-                  {checks.length === 0 ? <div className="text-[11px] text-dim">—</div> : checks.map((c) => (
+                  {checks.length === 0 ? <div className="text-[0.6875rem] text-dim">—</div> : checks.map((c) => (
                     <div key={c.id} className="group flex items-start gap-1.5 pl-2">
-                      <span className="min-w-0 flex-1 font-mono text-[11.5px] leading-snug break-words text-slate-700">{c.command}</span>
+                      <span className="min-w-0 flex-1 font-mono text-[0.71875rem] leading-snug break-words text-slate-700">{c.command}</span>
                       <button title={t("plans.confirm.remove")} onClick={() => edit("commands", () => onPatch({ remove_checks: [c.id] }))}
-                        className="shrink-0 px-1 text-[12px] leading-none text-slate-400 hover:text-bad">×</button>
+                        className="shrink-0 px-1 text-[0.75rem] leading-none text-slate-400 hover:text-bad">×</button>
                     </div>
                   ))}
                 </div>
@@ -672,9 +789,9 @@ function ConfirmCard({ draft, valid, busy, errors, onPatch, onDraft, onSubmit }:
                 <div key={d.name} className="flex items-center gap-2 text-xs">
                   <b className="w-10 font-mono text-slate-800">{d.name}</b>
                   <span className="text-dim">{d.role ? (LAYER_KEY[d.role] ? t(LAYER_KEY[d.role]) : d.role) : ""}</span>
-                  <span className="num text-[11px] text-slate-500">{d.host}</span>
+                  <span className="num text-[0.6875rem] text-slate-500">{d.host}</span>
                   <button title={t("plans.confirm.remove")} onClick={() => edit("devices", () => onPatch({ remove_devices: [d.name] }))}
-                    className="ml-auto px-1 text-[12px] leading-none text-slate-400 hover:text-bad">×</button>
+                    className="ml-auto px-1 text-[0.75rem] leading-none text-slate-400 hover:text-bad">×</button>
                 </div>
               ))}
             </div>
@@ -688,7 +805,13 @@ function ConfirmCard({ draft, valid, busy, errors, onPatch, onDraft, onSubmit }:
         {errors && (
           <div className="mx-3 mb-2 rounded-[3px] bg-rose-50 px-3 py-2 text-xs text-rose-800 ring-1 ring-rose-200">
             <div className="font-semibold">{errors[0]}</div>
-            <ul className="mt-1 list-disc pl-4 font-mono text-[11.5px] break-words">{errors.slice(1).map((p, i) => <li key={i}>{p}</li>)}</ul>
+            <ul className="mt-1 list-disc pl-4 font-mono text-[0.71875rem] break-words">{errors.slice(1).map((p, i) => <li key={i}>{p}</li>)}</ul>
+          </div>
+        )}
+        {!dryDone && (
+          <div className="mx-3 mb-2 flex items-center gap-2 border-l-2 border-l-slate-400 bg-[#f1f3f5] px-2.5 py-1 text-[0.72rem] text-slate-600" data-testid="dry-hint">
+            <span className="min-w-0 flex-1">{t("dry.suggest")}</span>
+            <button type="button" disabled={dryRunning} onClick={onDryRun} className="shrink-0 text-brand hover:underline disabled:opacity-50">{dryRunning ? t("plans.running") : t("dry.run")}</button>
           </div>
         )}
         <div className="flex items-center gap-3 border-t border-line px-4 py-3">
@@ -750,12 +873,12 @@ function PlanDetail({ name, running, lastRunId, trendKey, onRenamed }: {
     <div className="flex flex-wrap items-center gap-2 border-b border-line pb-3" data-testid="plan-toolbar">
       <span className="text-xs text-slate-600">{t("plans.draft.name")}</span>
       <input value={newName} onChange={(e) => setNewName(e.target.value)} data-testid="rename-input"
-        className="w-[200px] rounded-[3px] border border-line bg-white px-2 py-[3px] font-mono text-[12px] focus:border-brand focus:outline-none" />
+        className="w-[200px] rounded-[3px] border border-line bg-white px-2 py-[3px] font-mono text-[0.75rem] focus:border-brand focus:outline-none" />
       <Btn small disabled={!newName.trim() || newName.trim() === name || running} onClick={rename}>{t("plans.rename")}</Btn>
       {renameErr && <span className="text-xs text-bad">{renameErr}</span>}
       <span className="ml-auto flex items-center gap-1.5">
         <select value={fmt} onChange={(e) => setFmt(e.target.value as "md" | "html")} data-testid="report-format"
-          className="rounded-[3px] border border-line bg-white px-1.5 py-[3px] text-[12px] focus:border-brand focus:outline-none">
+          className="rounded-[3px] border border-line bg-white px-1.5 py-[3px] text-[0.75rem] focus:border-brand focus:outline-none">
           <option value="md">Markdown</option>
           <option value="html">HTML</option>
         </select>
@@ -780,7 +903,7 @@ function PlanDetail({ name, running, lastRunId, trendKey, onRenamed }: {
               {trend.llm && trend.analysis ? <Md text={trend.analysis} /> : (
                 <>
                   <div className="text-xs text-slate-600">{fill(t("plans.trend.noLlm"), { err: trend.error || "-" })}</div>
-                  {trend.table && <pre className="term overflow-x-auto px-3 py-2 text-[11.5px] leading-relaxed">{trend.table}</pre>}
+                  {trend.table && <pre className="term overflow-x-auto px-3 py-2 text-[0.71875rem] leading-relaxed">{trend.table}</pre>}
                 </>
               )}
             </div>
@@ -813,7 +936,7 @@ function PlanDetail({ name, running, lastRunId, trendKey, onRenamed }: {
               <>
                 <div className="mt-4 mb-1.5 flex items-baseline gap-2">
                   <span className="text-xs font-semibold text-slate-700">{t("plans.runs.metrics")}</span>
-                  <span className="text-[11px] text-dim">{fill(t("plans.runs.metricsNote"), { n: runs.length })}</span>
+                  <HelpTip text={fill(t("plans.runs.metricsNote"), { n: runs.length })} />
                 </div>
                 <div className="divide-y divide-line border border-line bg-white" data-testid="plan-metrics">
                   {metricRows.map(([k, pts]) => {
@@ -822,15 +945,15 @@ function PlanDetail({ name, running, lastRunId, trendKey, onRenamed }: {
                     const delta = pts.length > 1 ? last - pts[pts.length - 2][1] : null;
                     return (
                       <div key={k} className="flex items-center gap-3 px-2 py-1">
-                        <span className="w-[46%] min-w-0 truncate font-mono text-[11.5px] text-slate-700" title={`${dev} / ${cid} / ${m}`}>{dev} · {m}</span>
+                        <span className="w-[46%] min-w-0 truncate font-mono text-[0.71875rem] text-slate-700" title={`${dev} / ${cid} / ${m}`}>{dev} · {m}</span>
                         <span className="text-brand">{pts.length > 1 ? <Spark series={pts} className="h-5 w-[110px]" /> : <span className="inline-block w-[110px]" />}</span>
                         <span className="num ml-auto text-xs font-semibold text-slate-800">{last}</span>
-                        <span className={cn("num w-12 text-right text-[11px]", delta ? (delta > 0 ? "text-warn" : "text-dim") : "text-dim")}>{delta === null ? "" : (delta > 0 ? "+" : "") + delta}</span>
+                        <span className={cn("num w-12 text-right text-[0.6875rem]", delta ? (delta > 0 ? "text-warn" : "text-dim") : "text-dim")}>{delta === null ? "" : (delta > 0 ? "+" : "") + delta}</span>
                       </div>
                     );
                   })}
                   {allMetrics.length > metricRows.length && (
-                    <div className="px-2 py-1 text-[11px] text-dim">{fill(t("plans.runs.metricsMore"), { n: allMetrics.length - metricRows.length })}</div>
+                    <div className="px-2 py-1 text-[0.6875rem] text-dim">{fill(t("plans.runs.metricsMore"), { n: allMetrics.length - metricRows.length })}</div>
                   )}
                 </div>
               </>
@@ -840,7 +963,7 @@ function PlanDetail({ name, running, lastRunId, trendKey, onRenamed }: {
           <div>
             <div className="mb-1.5 flex items-baseline gap-2">
               <span className="text-xs font-semibold text-slate-700">{t("plans.runs.latest")}</span>
-              <span className="num text-[11px] text-dim">{latest.run_id} · {when(latest.started_at)}</span>
+              <span className="num text-[0.6875rem] text-dim">{latest.run_id} · {when(latest.started_at)}</span>
             </div>
             <table className="w-full table-fixed border border-line bg-white text-xs" data-testid="plan-latest">
               <tbody className="divide-y divide-line">
@@ -850,17 +973,17 @@ function PlanDetail({ name, running, lastRunId, trendKey, onRenamed }: {
                 ) : d.checks.map((c, j) => (
                   <tr key={d.name + c.id} className="align-top">
                     <td className="w-16 px-2 py-1.5 font-mono font-semibold text-slate-800">{j === 0 ? d.name : ""}</td>
-                    <td className="w-[36%] px-2 py-1.5 font-mono text-[11.5px] break-words text-slate-700">{c.id}</td>
+                    <td className="w-[36%] px-2 py-1.5 font-mono text-[0.71875rem] break-words text-slate-700">{c.id}</td>
                     <td className="px-2 py-1.5">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Badge className={STATUS_TONE[c.status] ?? STATUS_TONE.error}>{STATUS_KEY[c.status] ? t(STATUS_KEY[c.status]) : c.status}</Badge>
-                        {Object.entries(c.metrics ?? {}).map(([m, v]) => <span key={m} className="num text-[11px] text-slate-600">{m}={v ?? "-"}</span>)}
+                        {Object.entries(c.metrics ?? {}).map(([m, v]) => <span key={m} className="num text-[0.6875rem] text-slate-600">{m}={v ?? "-"}</span>)}
                       </div>
-                      {c.detail && <div className="mt-0.5 text-[11px] break-words text-warn">{c.detail}</div>}
+                      {c.detail && <div className="mt-0.5 text-[0.6875rem] break-words text-warn">{c.detail}</div>}
                       {c.status === "fail" && (c.evaluations ?? []).filter((e) => !e.passed).map((e, k) => (
-                        <div key={k} className="mt-0.5 font-mono text-[11px] break-words text-bad">✗ {e.type} {e.value}</div>
+                        <div key={k} className="mt-0.5 font-mono text-[0.6875rem] break-words text-bad">✗ {e.type} {e.value}</div>
                       ))}
-                      {c.output && <pre className="term mt-1 max-h-32 overflow-auto px-2 py-1 text-[11px] leading-snug whitespace-pre">{c.output}</pre>}
+                      {c.output && <pre className="term mt-1 max-h-32 overflow-auto px-2 py-1 text-[0.6875rem] leading-snug whitespace-pre">{c.output}</pre>}
                     </td>
                   </tr>
                 )))}

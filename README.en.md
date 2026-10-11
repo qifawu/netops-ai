@@ -15,8 +15,8 @@
 - **Structured conclusions.** Root cause, confidence and the quoted evidence, checked against six hypothesis families. If the cause cannot be determined, the result states what is missing and which command would settle it.
 - **Topology.** From NetBox (optional, read-only, webhook refresh) or from a YAML file.
 - **Playbooks (SOP).** YAML advice for the agent, with a linter; six examples: interface down, OSPF adjacency, BGP session, device restart, high CPU, interface errors.
-- **Conversational inspection plans.** Define a plan in the dashboard by talking to an assistant: what you care about, which devices, how often. The assistant proposes checks and a schedule, and looks commands up in the command catalog and the document library when you do not remember them. New plans and changes to existing ones go through the same flow. **The commands, the target machines and the schedule must each be confirmed before the plan is saved and enabled**; plans can be paused, rescheduled and deleted, every run is stored, and trend analysis and report export are available.
-- **Scheduled inspection.** Trend detectors on Zabbix history, live read-only status checks, history, diff against the previous run, Markdown/HTML export.
+- **Custom inspections, defined by conversation.** Define your own inspection in the dashboard by talking to an assistant (optionally starting from the basic inspection): what you care about, which devices, how often. The assistant proposes checks and a schedule, and looks commands up in the command catalog and the document library when you do not remember them. New plans and changes to existing ones go through the same flow. **The commands, the target machines and the schedule must each be confirmed before the plan is saved and enabled**; plans can be paused, rescheduled and deleted, every run is stored, and trend analysis and report export are available.
+- **Basic inspection.** The default health check: trend detectors on Zabbix history and live read-only status checks (interfaces, OSPF, BGP, error counters), all judged by fixed rules; the page explains what each check looks at, how it is judged and which command it runs, and lets you change its schedule; history, diff against the previous run, Markdown/HTML export.
 - **Investigation trace and command audit.** Every step of an incident's investigation is recorded (tool, arguments, result); the audit page lists every command the agent ran and every command the whitelist refused.
 - **Local documentation search (knowledge base).** Keyword (BM25) search over your own documents, used by the agent's `doc_search` tool, the knowledge-base page and the inspection planner's command lookup. The index ships empty; build it with `tools/kb_ingest.py`. Results are labelled as documentation, never as device evidence.
 - **Dashboard.** Chinese and English: overview, incidents, topology, inspection, audit, knowledge base, settings. A demo mode masks IP addresses and IDs.
@@ -31,7 +31,7 @@
 <p align="center"><img src="docs/images/guard.png" alt="two-layer read-only guard" width="900"></p>
 
 - **Conclude.** The model fills a strict schema. For each of six hypothesis families (local action, local hardware/resource, remote/upstream, link/path quality, management plane, monitoring artifact) it must report supported, ruled out (with counter-evidence) or undetermined. An undetermined result must state which data and which command would settle it.
-- **Inspection plans (defined by conversation).** The conversation is a LangGraph state graph: the entry splits new plans from changes to existing ones; each turn the model returns a reply, a draft and suggestions; the draft is immediately checked for format and against the read-only whitelist, and on failure the problems go back to the model (at most 2 repairs) before anything is let through; when the user does not remember a command, candidates are searched in the command catalog and the document library and each candidate passes the whitelist too; the confirmation step requires the commands, the machines and the schedule to be confirmed one by one before saving. A write command cannot enter a plan.
+- **Custom inspections (defined by conversation).** The conversation is a LangGraph state graph: the entry splits new plans from changes to existing ones; each turn the model returns a reply, a draft and suggestions; the draft is immediately checked for format and against the read-only whitelist, and on failure the problems go back to the model (at most 2 repairs) before anything is let through; when the user does not remember a command, candidates are searched in the command catalog and the document library and each candidate passes the whitelist too; the confirmation step requires the commands, the machines and the schedule to be confirmed one by one before saving. A write command cannot enter a plan.
 
 <p align="center"><img src="docs/images/inspection-plan-flow.png" alt="conversational inspection plan flow" width="1000"></p>
 
@@ -93,7 +93,7 @@ Fault injected: `neighbor 10.0.0.2 shutdown` on V1. Six alerts arrived from both
 
 <p align="center"><img src="docs/images/real-audit-en.png" alt="Command audit" width="900"></p>
 
-**Automated inspection**: trend findings plus read-only status checks of every device:
+**Basic inspection**: the default trend findings plus read-only status checks of every device:
 
 <p align="center"><img src="docs/images/ui-inspection.png" alt="Inspection" width="900"></p>
 
@@ -107,7 +107,7 @@ Every incident keeps the agent's investigation trace: which tool was called, wit
 
 <p align="center"><img src="docs/images/real-trace-en.png" alt="investigation steps" width="460"></p>
 
-### Defining an inspection plan by conversation
+### Defining a custom inspection by conversation
 
 The assistant asks one or two key questions at a time and the draft with its validation status is updated live on the right. When a device scope, a schedule or checks have to be chosen, the assistant puts an interactive picker in the conversation (devices grouped by core, aggregation and access, with shortcuts such as “all core”); the selection bypasses the model and goes straight into the draft. Short hints appear below the bubbles (for example, “counter checks should not run more often than every 5 minutes”).
 

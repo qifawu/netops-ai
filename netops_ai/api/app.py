@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from . import dashboard
 from .pipeline import _env, process_alert
 from .schemas import (
+    BasicScheduleRequest,
     ChatRequest,
     InspectionConfigRequest,
     InspectionIgnoreRequest,
@@ -163,6 +164,35 @@ def api_incidents() -> list:
     return dashboard.build_incidents(dashboard.load_alerts())
 
 
+# 历史告警（筛选 + 同类折叠 + 分页）和单条详情。上面的 /api/incidents 原样保留给总览和旧调用方；
+# 列表页不再一次拉几 MB 的全量，只拉一页摘要，点哪条再按 ID 拉详情。**这两条要排在 /api/incidents/{id} 之前声明**。
+@app.get("/api/incidents/list")
+def api_incidents_list(range: str = "all", device: str = "", type: str = "", confidence: str = "",
+                       unresolved: int = 0, page: int = 1, page_size: int = 30) -> dict:
+    from . import incident_history as _ih
+
+    return _ih.query_incidents(_ih.cached_incidents(), range_=range, device=device, fault_type=type,
+                               confidence=confidence, unresolved=bool(unresolved), page=page, page_size=page_size)
+
+
+@app.get("/api/incidents/{incident_id}")
+def api_incident_detail(incident_id: str) -> JSONResponse:
+    from . import incident_history as _ih
+
+    inc = _ih.incident_detail(incident_id, _ih.cached_incidents())
+    if inc is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return JSONResponse(inc)
+
+
+@app.get("/api/devices/{name}/history")
+def api_device_history(name: str) -> dict:
+    """一台设备的排查历史：过去的事件 + 基础 / 自定义巡检发现，倒序；巡检连续出现的同一条只算一条。"""
+    from . import incident_history as _ih
+
+    return _ih.build_device_history(name, _ih.cached_incidents())
+
+
 @app.get("/api/status")
 def api_status() -> JSONResponse:
     return JSONResponse(dashboard.build_status())
@@ -284,6 +314,82 @@ def api_export_inspection(format: str = "md") -> Response:
         return Response(_export.render_markdown(view), media_type="text/markdown; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="inspection-report.md"'})
     return JSONResponse({"error": "format 只支持 md / html"}, status_code=400)
+
+
+@app.get("/api/inspection/builtin")
+def api_builtin_inspections() -> dict:
+    """两类内置（预设）巡检的概况，给巡检计划列表顶部的两行「预设」用：趋势巡检（读 Zabbix 历史）和
+    状态巡检（登设备做固定四项只读检查）。它们由全局周期 `SCHEDULE_INTERVAL_MINUTES` 一起驱动，
+    跟对话创建的计划是两套东西；周期改 `.env`（系统设置页）且要重启进程才生效，所以这里只读。"""
+    from . import schedule
+
+    env = dashboard._env()
+    minutes = schedule.interval_minutes(env)
+    state = schedule.load_state() or {}
+    nxt = schedule.next_basic_run(env, state=state)
+    next_at = nxt.isoformat(timespec="seconds") if nxt else None
+    latest = dashboard.load_latest_inspection()
+    view = dashboard.build_inspection_view(latest) if latest else {}
+    status = view.get("status") or {}
+    jobs = state.get("jobs") or {}
+    return {
+        "interval_minutes": minutes,
+        "enabled": bool(minutes),
+        "next_run_at": next_at,
+        "rows": [
+            {"key": "trend", "ok": (jobs.get("inspection") or {}).get("ok"),
+             # 老记录没有 scanned_at：退到运行历史里最近一次趋势巡检的时间
+             "last_run_at": view.get("scanned_at") or next((h.get("at") for h in view.get("history") or [] if h.get("kind") == "trend"), None),
+             "summary": {k: view.get(k, 0) for k in ("finding_count", "scanned_hosts", "scanned_items")}},
+            {"key": "status", "last_run_at": status.get("checked_at"), "ok": (jobs.get("inspection") or {}).get("ok"),
+             "summary": status.get("summary") or {}},
+        ],
+    }
+
+
+# ---- 基础巡检：说明（检查什么、规则、命令、阈值）+ 周期（读写 SCHEDULE_INTERVAL_MINUTES）----
+
+
+def _basic_schedule_view() -> dict:
+    from netops_ai.inspection.basic_spec import SCHEDULE_OPTIONS
+
+    from . import schedule
+
+    env = dashboard._env()
+    minutes = schedule.interval_minutes(env)
+    last = schedule.last_basic_run_at()
+    nxt = schedule.next_basic_run(env)
+    # 值是真实进程环境变量给的，写 .env 盖不住它：如实告诉页面（只看这一个键，不碰别的）
+    import os
+
+    from_process_env = "SCHEDULE_INTERVAL_MINUTES" in os.environ
+    return {"interval_minutes": minutes, "options": list(SCHEDULE_OPTIONS),
+            "last_run_at": last.isoformat(timespec="seconds") if last else None,
+            "next_run_at": nxt.isoformat(timespec="seconds") if nxt else None,
+            "overridden_by_process_env": from_process_env}
+
+
+@app.get("/api/inspection/basic/spec")
+def api_basic_spec(lang: str = "zh") -> dict:
+    """基础巡检页顶部「这套基础巡检检查什么」：状态巡检每项的命令（现读 status.COMMANDS）/ 规则 / 范围，
+    趋势检测器和当前阈值（现读 inspection.yaml），外加当前周期、上次和下次运行时间。只读。"""
+    from netops_ai.inspection.basic_spec import build_spec
+
+    return {**build_spec("en" if lang == "en" else "zh"), "schedule": _basic_schedule_view()}
+
+
+@app.put("/api/inspection/basic/schedule")
+def api_basic_schedule(body: BasicScheduleRequest) -> JSONResponse:
+    """改基础巡检周期：写回 `.env` 的 SCHEDULE_INTERVAL_MINUTES（走设置页同一个原子写函数，只改这一个键）。
+    0 = 关闭。只接受页面下拉里的几个值。定时线程每轮现读，下一轮就按新周期走。"""
+    from netops_ai.inspection.basic_spec import SCHEDULE_OPTIONS
+
+    from .settings import write_dotenv_updates
+
+    if body.minutes not in SCHEDULE_OPTIONS:
+        return JSONResponse({"message": f"minutes must be one of {', '.join(map(str, SCHEDULE_OPTIONS))} (0 = off)"}, status_code=400)
+    write_dotenv_updates({"SCHEDULE_INTERVAL_MINUTES": str(body.minutes)})
+    return JSONResponse(_basic_schedule_view())
 
 
 @app.post("/api/schedule/run")

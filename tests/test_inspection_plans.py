@@ -605,7 +605,7 @@ class TestStoreAndSchedule(Tmp):
         self.assertEqual(checks["cpu"]["metrics"]["cpu_5m"], 1)
         n, ok, note = schedule.plans_status()
         self.assertEqual((n, ok), (1, True))
-        self.assertIn("巡检计划 1 个启用", note)
+        self.assertIn("自定义巡检 1 个启用", note)
 
     def test_重入保护(self):
         from netops_ai.api import schedule

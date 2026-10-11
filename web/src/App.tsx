@@ -11,7 +11,7 @@ import { setMask, useMask } from "./lib/mask";
 import { LangContext, fill, loadStoredLang, storeLang, translate, useLang, useSetLang, useT, type DictKey, type Lang } from "./lib/i18n";
 import { AuthGate, UserMenu, memberNavItems, useMember } from "./member";
 
-type Item = { key: string; labelKey: DictKey; descKey: DictKey; page: FC };
+type Item = { key: string; labelKey: DictKey; page: FC };
 type Status = { items: { key: string; label: string; ok: boolean; note?: string }[] };
 
 /** `/api/status` 的 4 项 `label` 是后端拼的中文（`dashboard.py::build_status`），但每项
@@ -27,7 +27,7 @@ function statusLabel(t: (k: DictKey) => string, key: string, label: string): str
   }
   if (key === "schedule") {
     if (label === "定时任务未开") return t("status.schedule.off");
-    const p = label.match(/^巡检计划\s*(\d+)/);
+    const p = label.match(/^(?:巡检计划|自定义巡检)\s*(\d+)/);
     if (p) return fill(t("status.schedule.plansTemplate"), { n: p[1] });
     const m = label.match(/(\d+)/);
     if (m) return fill(t("status.schedule.everyMinutesTemplate"), { n: m[1] });
@@ -54,18 +54,18 @@ const ICON: Record<string, string> = {
  *  真正"出事了要看"的信号由页面里的状态色（红 / 橙 / 绿）承担。 */
 
 const NAV: { groupKey: DictKey; items: Item[] }[] = [
-  { groupKey: "nav.group.home", items: [{ key: "overview", labelKey: "nav.overview", descKey: "nav.overview.desc", page: Overview }] },
+  { groupKey: "nav.group.home", items: [{ key: "overview", labelKey: "nav.overview", page: Overview }] },
   { groupKey: "nav.group.ops", items: [
-    { key: "incidents", labelKey: "nav.incidents", descKey: "nav.incidents.desc", page: Incidents },
-    { key: "inspection", labelKey: "nav.inspection", descKey: "nav.inspection.desc", page: Inspection },
+    { key: "incidents", labelKey: "nav.incidents", page: Incidents },
+    { key: "inspection", labelKey: "nav.inspection", page: Inspection },
   ]},
   { groupKey: "nav.group.assets", items: [
-    { key: "topology", labelKey: "nav.topology", descKey: "nav.topology.desc", page: Topology },
-    { key: "knowledge", labelKey: "nav.knowledge", descKey: "nav.knowledge.desc", page: Knowledge },
+    { key: "topology", labelKey: "nav.topology", page: Topology },
+    { key: "knowledge", labelKey: "nav.knowledge", page: Knowledge },
   ] },
   { groupKey: "nav.group.admin", items: [
-    { key: "audit", labelKey: "nav.audit", descKey: "nav.audit.desc", page: Audit },
-    { key: "settings", labelKey: "nav.settings", descKey: "nav.settings.desc", page: Settings },
+    { key: "audit", labelKey: "nav.audit", page: Audit },
+    { key: "settings", labelKey: "nav.settings", page: Settings },
   ] },
 ];
 
@@ -114,18 +114,15 @@ function Shell() {
           <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] shrink-0 text-[#6fb3cf]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 3v5M6 21v-5m12 5v-5M4 16h4v5H4v-5Zm12 0h4v5h-4v-5ZM10 8h4v5h-4V8Z" />
           </svg>
-          <div className="min-w-0 leading-tight">
-            <div className="font-mono text-[14px] font-semibold tracking-tight text-white">netops-ai</div>
-            <div className="line-clamp-2 text-[10.5px] leading-[13px] text-slate-400">{t("app.tagline")}</div>
-          </div>
+          <div className="font-mono text-[0.875rem] font-semibold tracking-tight text-white">netops-ai</div>
         </div>
         <nav className="flex-1 py-2">
         {nav.map((g) => (
           <div key={g.groupKey} className="pb-1">
-            <div className="px-4 pt-3 pb-1 text-[10.5px] font-semibold tracking-wider text-slate-500 uppercase">{t(g.groupKey)}</div>
+            <div className="px-4 pt-3 pb-1 text-[0.65625rem] font-semibold tracking-wider text-slate-500 uppercase">{t(g.groupKey)}</div>
             {g.items.map((n) => (
               <button key={n.key} onClick={() => { setTab(n.key); location.hash = n.key; }}
-                className={cn("relative flex h-8 w-full items-center gap-2.5 px-4 text-left text-[13px] transition-colors",
+                className={cn("relative flex h-8 w-full items-center gap-2.5 px-4 text-left text-[0.8125rem] transition-colors",
                   tab === n.key
                     ? "bg-white/[0.08] font-medium text-white"
                     : "text-slate-300 hover:bg-white/[0.04] hover:text-white")}>
@@ -147,7 +144,7 @@ function Shell() {
         {status && status.items.length > 0 && (
           <div className="space-y-1 border-t border-white/10 px-4 py-3">
             {status.items.map((x) => (
-              <div key={x.key} title={x.note || ""} className="flex items-start gap-2 text-[11px] leading-[15px] text-slate-400">
+              <div key={x.key} title={x.note || ""} className="flex items-start gap-2 text-[0.6875rem] leading-[15px] text-slate-400">
                 <span className={cn("mt-[4px] inline-block h-[7px] w-[7px] shrink-0 rounded-full", x.ok ? "bg-[#3fb95f]" : "bg-[#e0902a]")} />
                 <span className="min-w-0">{statusLabel(t, x.key, x.label)}</span>
               </div>
@@ -159,23 +156,20 @@ function Shell() {
 
       <div className="min-w-0 flex-1">
         <header className="sticky top-0 z-20 flex h-[52px] items-center justify-between gap-4 border-b border-line bg-card px-6">
-          <div className="min-w-0 flex-1 leading-tight">
-            <div className="text-[15px] font-semibold text-slate-900">{t(cur.labelKey)}</div>
-            <div className="line-clamp-1 text-[11.5px] text-dim" title={t(cur.descKey)}>{t(cur.descKey)}</div>
-          </div>
+          <h1 className="min-w-0 flex-1 truncate text-[0.9375rem] font-semibold text-slate-900">{t(cur.labelKey)}</h1>
           <div className="flex shrink-0 items-center gap-1.5">
             {/* 只读是这套东西最该被一眼看到的约束：顶栏常驻一个小标签，不再做成彩色大按钮。 */}
             <span title={t("app.readonlyBadge")}
-              className="flex items-center gap-1.5 rounded-[2px] border border-brand/40 bg-brand/[0.06] px-2 py-[3px] text-[11px] font-semibold tracking-wide whitespace-nowrap text-brand">
+              className="flex items-center gap-1.5 rounded-[2px] border border-brand/40 bg-brand/[0.06] px-2 py-[3px] text-[0.6875rem] font-semibold tracking-wide whitespace-nowrap text-brand">
               <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 11V8a6 6 0 1 1 12 0v3M5 11h14v10H5V11Z" /></svg>
               {t("app.readonlyBadge")}
             </span>
             <button onClick={() => setLang(lang === "zh" ? "en" : "zh")} title="Switch language / 切换语言"
-              className="rounded-[2px] border border-line px-2 py-[3px] text-[11px] font-medium whitespace-nowrap text-slate-600 transition hover:border-slate-400 hover:text-slate-900">
+              className="rounded-[2px] border border-line px-2 py-[3px] text-[0.6875rem] font-medium whitespace-nowrap text-slate-600 transition hover:border-slate-400 hover:text-slate-900">
               {lang === "zh" ? "EN" : "中文"}
             </button>
             <button onClick={() => setMask(!mask)} title={t("app.demoMode.title")}
-              className={cn("flex items-center gap-1.5 rounded-[2px] border px-2 py-[3px] text-[11px] font-medium whitespace-nowrap transition",
+              className={cn("flex items-center gap-1.5 rounded-[2px] border px-2 py-[3px] text-[0.6875rem] font-medium whitespace-nowrap transition",
                 mask ? "border-brand/50 text-brand" : "border-line text-slate-600 hover:border-slate-400")}>
               <span className={cn("relative inline-block h-3 w-5 rounded-[2px] transition", mask ? "bg-brand" : "bg-slate-300")}>
                 <span className={cn("absolute top-[2px] h-2 w-2 rounded-[1px] bg-white transition-all", mask ? "left-[10px]" : "left-[2px]")} />
@@ -183,8 +177,8 @@ function Shell() {
               {t("app.demoMode")}
             </button>
             <div className="ml-2 border-l border-line pl-3 text-right leading-tight">
-              <div className="num text-[13px] font-semibold text-slate-800">{clock}</div>
-              <div className="num text-[10.5px] text-dim">{today}</div>
+              <div className="num text-[0.8125rem] font-semibold text-slate-800">{clock}</div>
+              <div className="num text-[0.65625rem] text-dim">{today}</div>
             </div>
             <UserMenu />
           </div>

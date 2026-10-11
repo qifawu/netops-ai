@@ -114,3 +114,9 @@ class PlaybookProposeRequest(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
     replace_file: str | None = None
     rebase: bool = False
+
+
+class BasicScheduleRequest(BaseModel):
+    """基础巡检周期（分钟）。0 = 关闭；只接受页面下拉的几个值，接口里再校验一遍。"""
+
+    minutes: int

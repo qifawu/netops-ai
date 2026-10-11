@@ -81,8 +81,8 @@ export function DevicePicker({ w, onSubmit }: { w: Widget; onSubmit: (s: Selecti
                     <input type="checkbox" checked={sel.has(d.name)} onChange={() => toggle(d.name)} className="accent-[#0f5c7a]"
                       data-testid={`pick-${d.name}`} />
                     <span className="min-w-0">
-                      <span className="block font-mono text-[12px] font-semibold text-slate-800">{d.name}</span>
-                      <span className="block truncate text-[11px] text-dim">
+                      <span className="block font-mono text-[0.75rem] font-semibold text-slate-800">{d.name}</span>
+                      <span className="block truncate text-[0.6875rem] text-dim">
                         {fill(t("plans.widget.neighbors"), { n: d.neighbors })} · <span className="num">{d.host}</span>
                       </span>
                     </span>
@@ -131,12 +131,12 @@ export function ScheduleChips({ w, onSubmit, label }: { w: Widget; onSubmit: (s:
           {daily && (
             <>
               <input type="time" value={time} onChange={(e) => setTime(e.target.value)} aria-label={t("plans.sched.daily")}
-                className="rounded-[3px] border border-line px-1.5 py-[3px] font-mono text-[12px] focus:border-brand focus:outline-none" />
+                className="rounded-[3px] border border-line px-1.5 py-[3px] font-mono text-[0.75rem] focus:border-brand focus:outline-none" />
               <Btn small tone="brand" disabled={!time}>{t("plans.widget.confirmDaily")}</Btn>
             </>
           )}
         </div>
-        {w.hint && <div className="border-l-2 border-l-brand/40 pl-2 text-[11.5px] leading-relaxed text-slate-600">{w.hint}</div>}
+        {w.hint && <div className="border-l-2 border-l-brand/40 pl-2 text-[0.71875rem] leading-relaxed text-slate-600">{w.hint}</div>}
       </form>
     </Frame>
   );
@@ -165,16 +165,16 @@ export function CheckPicker({ w, onSubmit }: { w: Widget; onSubmit: (s: Selectio
                 <input type="checkbox" className="mt-[3px] accent-[#0f5c7a]" checked={sel.has(it.id)} data-testid={`check-${it.id}`}
                   onChange={() => setSel((s) => { const x = new Set(s); if (x.has(it.id)) x.delete(it.id); else x.add(it.id); return x; })} />
                 <span className="min-w-0 flex-1">
-                  <span className="flex flex-wrap items-center gap-1.5 text-[13px] font-medium text-slate-800">
+                  <span className="flex flex-wrap items-center gap-1.5 text-[0.8125rem] font-medium text-slate-800">
                     {it.title}
                     {rec.has(it.id) && <Badge className="bg-white text-brand ring-brand/40">{t("plans.widget.recommended")}</Badge>}
                   </span>
                   <span className="block text-xs leading-relaxed text-slate-600">{it.what}</span>
                 </span>
                 <button type="button" onClick={(e) => { e.preventDefault(); setOpen(open === it.id ? "" : it.id); }} aria-expanded={open === it.id}
-                  className="shrink-0 text-[11px] text-slate-500 hover:text-brand">{t("plans.widget.showCommand")}</button>
+                  className="shrink-0 text-[0.6875rem] text-slate-500 hover:text-brand">{t("plans.widget.showCommand")}</button>
               </label>
-              {open === it.id && <div className="term mt-1 ml-6 overflow-x-auto px-2 py-1 text-[11.5px] whitespace-pre">{it.command}</div>}
+              {open === it.id && <div className="term mt-1 ml-6 overflow-x-auto px-2 py-1 text-[0.71875rem] whitespace-pre">{it.command}</div>}
             </div>
           ))}
         </div>
@@ -206,7 +206,7 @@ export function Hints({ hints, onClose }: { hints: Hint[]; onClose: (id: string)
   return (
     <div className="mt-1.5 space-y-1" data-testid="plan-hints">
       {hints.map((h) => (
-        <div key={h.id} className="flex items-start gap-2 border-l-2 border-l-slate-400 bg-[#f1f3f5] px-2.5 py-1 text-[11.5px] leading-relaxed text-slate-600">
+        <div key={h.id} className="flex items-start gap-2 border-l-2 border-l-slate-400 bg-[#f1f3f5] px-2.5 py-1 text-[0.71875rem] leading-relaxed text-slate-600">
           <span className="min-w-0 flex-1">{h.text}</span>
           <button type="button" aria-label={t("plans.hint.close")} title={t("plans.hint.close")} onClick={() => onClose(h.id)}
             className="shrink-0 px-0.5 leading-none text-slate-400 hover:text-slate-700">×</button>

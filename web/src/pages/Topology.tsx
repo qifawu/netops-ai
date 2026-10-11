@@ -3,7 +3,9 @@ import { cn, load, ts } from "../lib/api";
 import { AiText } from "../lib/aitext";
 import { Badge, Card, Empty, Loading } from "../lib/ui";
 import { oneLine } from "../lib/incident";
-import { useLang, useT, type DictKey } from "../lib/i18n";
+import { fill, useLang, useT, type DictKey } from "../lib/i18n";
+import HelpTip from "../lib/HelpTip";
+import { goTab } from "../lib/nav";
 
 type Dev = {
   managed: boolean;
@@ -68,27 +70,28 @@ export default function Topology() {
 
   const managed = d.devices.filter((x) => x.managed);
   return (
-    <div className="mx-auto max-w-[1280px] space-y-4">
-      <p className="text-sm leading-relaxed text-slate-600">
-        {t("topology.summary.source")} {d.source === "netbox" ? t("topology.summary.sourceNetbox") : t("topology.summary.sourceFile")}{t("topology.summary.readonly")} {d.window_hours} {t("topology.summary.hoursSuffix")}
+    <div className="page-wrap space-y-4">
+      <p className="flex flex-wrap items-center gap-x-1 text-sm leading-relaxed text-slate-600">
+        {fill(t("topology.summary.line"), { src: d.source === "netbox" ? t("topology.summary.sourceNetbox") : t("topology.summary.sourceFile"), h: d.window_hours })}
+        <HelpTip text={t("topology.summary.help")} />
         {d.netbox_error && (
           d.netbox_error.includes("先用")
             ? <span className="text-amber-600">{t("topology.netboxWarn")}</span>
             : <span className="text-rose-600">{t("topology.netboxFail")}{d.netbox_error}</span>
         )}
-        {d.cached_seconds != null && <span className="ml-3 text-xs text-slate-400">{t("topology.cachedPrefix")} {d.cached_seconds < 60 ? `${d.cached_seconds} ${t("topology.seconds")}` : `${Math.round(d.cached_seconds / 60)} ${t("topology.minutes")}`} {t("topology.cachedSuffix")}</span>}
+        {d.cached_seconds != null && <span className="ml-3 text-xs text-slate-400">{fill(t("topology.cachedLine"), { age: d.cached_seconds < 60 ? `${d.cached_seconds} ${t("topology.seconds")}` : `${Math.round(d.cached_seconds / 60)} ${t("topology.minutes")}` })}</span>}
         <button onClick={() => refresh(true)} disabled={busy} className="ml-3 rounded-[3px] border border-[#c3cad2] bg-white px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50">
           {busy ? t("topology.loading") : t("topology.reload")}
         </button>
       </p>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_330px]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_330px] min-[1920px]:grid-cols-[minmax(0,1fr)_420px] min-[1920px]:grid-cols-[minmax(0,1fr)_400px] min-[2560px]:grid-cols-[minmax(0,1fr)_480px]">
         <Card className="p-4">
           <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
             {rows.map((r) => (
               <g key={r}>
                 <rect x={0} y={layerY[r] - 34} width={W} height={68} rx={2} fill="#f4f6f8" stroke="#e3e7eb" />
-                <text x={16} y={layerY[r] + 4} className="fill-slate-500 text-[11px] font-semibold tracking-wide">{t(LAYER_KEY[r])}</text>
+                <text x={16} y={layerY[r] + 4} className="fill-slate-500 text-[0.6875rem] font-semibold tracking-wide">{t(LAYER_KEY[r])}</text>
               </g>
             ))}
             {d.links.map((l, i) => {
@@ -111,14 +114,14 @@ export default function Topology() {
                     fill={!x.managed ? "#f4f6f8" : bad ? "#fbefef" : "#ffffff"}
                     stroke={on ? "#0f5c7a" : !x.managed ? "#9aa5b1" : bad ? "#c42b2b" : "#8a96a3"}
                     strokeWidth={on ? 2.2 : 1.2} strokeDasharray={x.managed ? undefined : "4 3"} />
-                  <text x={p.x} y={p.y + 5} textAnchor="middle" className="fill-slate-800 font-mono text-[13px] font-semibold">{x.name}</text>
+                  <text x={p.x} y={p.y + 5} textAnchor="middle" className="fill-slate-800 font-mono text-[0.8125rem] font-semibold">{x.name}</text>
                   {bad && (
                     <g>
                       <rect x={p.x + NW / 2 - 10} y={p.y - NH / 2 - 8} width={20} height={16} rx={2} fill="#c42b2b" />
-                      <text x={p.x + NW / 2} y={p.y - NH / 2 + 3.5} textAnchor="middle" className="fill-white font-mono text-[10px] font-semibold">{x.incident_count}</text>
+                      <text x={p.x + NW / 2} y={p.y - NH / 2 + 3.5} textAnchor="middle" className="fill-white font-mono text-[0.625rem] font-semibold">{x.incident_count}</text>
                     </g>
                   )}
-                  <text x={p.x} y={p.y + NH / 2 + 15} textAnchor="middle" className="fill-slate-500 font-mono text-[10px]" stroke="#ffffff" strokeWidth={3} paintOrder="stroke">{x.managed ? na(x.mgmt_ip) : t("topology.layer.unmanaged")}</text>
+                  <text x={p.x} y={p.y + NH / 2 + 15} textAnchor="middle" className="fill-slate-500 font-mono text-[0.625rem]" stroke="#ffffff" strokeWidth={3} paintOrder="stroke">{x.managed ? na(x.mgmt_ip) : t("topology.layer.unmanaged")}</text>
                 </g>
               );
             })}
@@ -135,7 +138,7 @@ export default function Topology() {
             <div>
               <div className="mb-4 flex items-start gap-2">
                 <div>
-                  <div className="font-mono text-[16px] font-semibold">{cur.name}</div>
+                  <div className="font-mono text-[1rem] font-semibold">{cur.name}</div>
                   <div className="text-xs text-dim">{t(LAYER_KEY[cur.role]) || cur.role_cn} · {t("topology.detail.from")} {cur.inventory_source}</div>
                 </div>
                 {cur.incident_count > 0 && <Badge className="ml-auto bg-rose-50 text-rose-700 ring-rose-200">{t("topology.detail.incidentBadge")} {cur.incident_count} {t("topology.detail.incidentBadgeSuffix")}</Badge>}
@@ -185,17 +188,24 @@ export default function Topology() {
                   <div className="mt-0.5"><AiText text={oneLine(cur.latest_root_cause, 60)} /></div>
                 </div>
               )}
+              {cur.managed && (
+                <button type="button" onClick={() => goTab(`incidents?device=${encodeURIComponent(cur.name)}&view=history`)}
+                  className="mt-3 flex w-full items-center justify-between rounded-[3px] border border-line px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50">
+                  {t("topology.detail.viewHistory")}
+                  <span className="text-brand">→</span>
+                </button>
+              )}
             </div>
           ) : (
-            <Empty title={t("topology.detail.empty.title")} hint={t("topology.detail.empty.hint")} />
+            <Empty title={t("topology.detail.empty.title")} />
           )}
         </Card>
       </div>
 
       <Card className="overflow-hidden">
-        <div className="border-b border-line bg-[#f6f7f9] px-4 py-2 text-[13px] font-semibold tracking-wide text-slate-800">{t("topology.table.title")} <span className="ml-1 text-xs font-normal text-dim">{t("topology.table.countPrefix")} {managed.length} {t("topology.table.countSuffix")}</span></div>
+        <div className="border-b border-line bg-[#f6f7f9] px-4 py-2 text-[0.8125rem] font-semibold tracking-wide text-slate-800">{t("topology.table.title")} <span className="ml-1 text-xs font-normal text-dim">{t("topology.table.countPrefix")} {managed.length} {t("topology.table.countSuffix")}</span></div>
         <table className="w-full text-sm">
-          <thead className="border-b border-line text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
+          <thead className="border-b border-line text-[0.6875rem] font-semibold tracking-wide text-slate-500 uppercase">
             <tr>{(["topology.table.col.device", "topology.table.col.layer", "topology.table.col.mgmtIp", "topology.table.col.zabbixHost", "topology.table.col.uplinks", "topology.table.col.incidents"] as DictKey[]).map((h) => (
               <th key={h} className="px-4 py-1.5 text-left font-semibold">{t(h)}</th>))}</tr>
           </thead>
@@ -203,7 +213,7 @@ export default function Topology() {
             {managed.map((x) => (
               <tr key={x.name} onClick={() => setSel(x.name)}
                 className={cn("cursor-pointer transition even:bg-[#fafbfc] hover:bg-brand/[0.04]", sel === x.name && "!bg-brand/[0.07]")}>
-                <td className="px-4 py-1.5 font-mono text-[12.5px] font-semibold">{x.name}</td>
+                <td className="px-4 py-1.5 font-mono text-[0.78125rem] font-semibold">{x.name}</td>
                 <td className="px-4 py-1.5 text-dim">{t(LAYER_KEY[x.role]) || x.role_cn}</td>
                 <td className="px-4 py-1.5 font-mono text-xs">{na(x.mgmt_ip)}</td>
                 <td className="px-4 py-1.5 font-mono text-xs text-dim">{na(x.zabbix_host)}</td>

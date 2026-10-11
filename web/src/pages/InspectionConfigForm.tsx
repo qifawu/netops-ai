@@ -112,7 +112,7 @@ export default function InspectionConfigForm({ cfg, onSaved, onRun }: {
                           className={cn(inputCls, cur !== String(def) && "border-amber-300 bg-amber-50/50")} />
                         <span className="text-dim">{cur !== String(def) ? fill(t("inspection.cfg.defaultIs"), { v: String(def) }) : t("inspection.cfg.isDefault")}</span>
                       </span>
-                      <span className="mt-0.5 block text-[11px] leading-snug text-dim">{p.help}</span>
+                      <span className="mt-0.5 block text-[0.6875rem] leading-snug text-dim">{p.help}</span>
                     </label>
                   );
                 })}
@@ -143,7 +143,6 @@ export default function InspectionConfigForm({ cfg, onSaved, onRun }: {
         <div className="flex items-center gap-3">
           <Btn tone="brand" busy={busy} disabled={busy || (!dirty && cfg.file_exists)} onClick={() => save(true)}>{t("inspection.cfg.saveRun")}</Btn>
           <Btn disabled={busy || !dirty} onClick={() => save(false)}>{t("inspection.cfg.saveOnly")}</Btn>
-          <span className="text-xs text-dim">{t("inspection.cfg.footer")}</span>
         </div>
       </div>
     </Card>

@@ -1,11 +1,23 @@
-import { useEffect, useState } from "react";
-import { brief, cn, load, plain, ts } from "../lib/api";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { brief, cn, plain, ts } from "../lib/api";
 import { AiInline, AiText } from "../lib/aitext";
 import { stepLabel } from "../lib/labels";
-import { Badge, Card, CardHead, Empty, Icon, Loading, PATH } from "../lib/ui";
-import { MERGE_HINT, REPEAT_HINT, confLevel, confMeta, faultType, fmtDur, titleOf } from "../lib/incident";
+import { Badge, Card, Empty, Icon, Loading, PATH } from "../lib/ui";
+import { MERGE_HINT, REPEAT_HINT, confLevel, confMeta, fmtDur, titleOf } from "../lib/incident";
 import { takePending } from "../lib/nav";
+import { registerIds } from "../lib/mask";
 import { fill, useLang, useT, type DictKey } from "../lib/i18n";
+import DeviceHistory, { Seg } from "./DeviceHistory";
+import HelpTip from "../lib/HelpTip";
+import { FAULT_KEY, dayHead, dayKey, dayTime, hm } from "./incidentShared";
+
+/** 「告警与结论」页 = 左边历史告警（筛选 + 按天分组 + 同类折叠 + 分页），右边一次故障的详情（页签）
+ *  或一台设备的排查历史。
+ *
+ *  以前左边每条堆两行结论 + 好几个徽标，右边六张卡片一路铺下去，挤。现在：
+ *  - 列表一次故障一行，同一指纹（同设备同类故障）折成一行「同类 ×N」，点开才看每次；
+ *  - 详情默认只给「结论」，证据 / 告警 / 调查步骤 / 假设清单 / 排查历史各自一个页签；
+ *  - token、编号、指纹、系统标出的矛盾收进「更多信息」，矛盾条数在折叠标题上露出来，不藏。 */
 
 type Alert = { eventid: string; name: string; clock: number; role: string; role_cn: string; caused_by: string; reason: string };
 type Ev = { claim: string; source: string; source_from: string; source_label?: string };
@@ -19,7 +31,21 @@ type Inc = {
   trace: { tool: string; tool_label?: string; args: any; ok: boolean; result?: any; elapsed_ms?: number; error?: string }[];
   token_cost: { forensics: number; analysis: number; other: number; total: number };
   elapsed: Record<string, number>; elapsed_total: number; feishu: { sent?: boolean }; incomplete: boolean;
+  rule_violations?: string[]; fault_type?: string; needs_human?: boolean; devices?: string[];
 };
+type Brief = {
+  incident_id: string; fingerprint: string; host: string; devices: string[]; clock: number; headline: string; root_cause: string;
+  confidence: string; fault_type: string; alert_count: number; repeat_count?: number | null; elapsed_total?: number;
+  needs_human: boolean; consistent?: boolean | null;
+};
+type Row = { fingerprint: string; host: string; devices: string[]; fault_type: string; count: number; latest: Brief; occurrences: Brief[] };
+type Facet = { value: string; count: number };
+type ListResp = {
+  total_incidents: number; total_rows: number; page: number; has_more: boolean; rows: Row[];
+  facets: { devices: Facet[]; types: Facet[]; confidence: Facet[]; needs_human: number; in_range: number };
+};
+type Range = "24h" | "7d" | "30d" | "all";
+type Filters = { range: Range; device: string; type: string; confidence: string; unresolved: boolean };
 
 const ROLE_COLOR: Record<string, string> = {
   root: "bg-rose-50 text-rose-700 ring-rose-200",
@@ -51,135 +77,339 @@ const STATUS_KEY: Record<string, DictKey> = {
   已排除: "incidents.checklist.status.ruledOut",
   暂时无法判断: "incidents.checklist.status.cannotDetermine",
 };
+const CONF_KEY: Record<string, DictKey> = { high: "conf.high.long", medium: "conf.medium.long", low: "conf.low.long", none: "conf.none.label" };
+
+/** 设备与拓扑页「查看排查历史」跳过来时带 `#incidents?device=V1&view=history`。 */
+function hashParams() {
+  const q = location.hash.split("?")[1] ?? "";
+  return new URLSearchParams(q);
+}
+
+const PAGE_SIZE = 30;
+const selCls = "h-7 min-w-0 rounded-[3px] border border-[#c3cad2] bg-white px-1.5 text-xs text-slate-700 focus:border-brand focus:outline-none";
 
 export default function Incidents() {
   const t = useT();
-  const [rows, setRows] = useState<Inc[] | null>(null);
-  const [sel, setSel] = useState<string>("");
-  useEffect(() => {
-    load<Inc[]>("incidents", "/api/incidents").then((r) => {
-      setRows(r);
-      const want = takePending();
-      setSel(r.some((x) => x.incident_id === want) ? want : r[0]?.incident_id ?? "");
-    }).catch(() => setRows([]));
-  }, []);
-  if (!rows) return <Loading />;
-  const cur = rows.find((r) => r.incident_id === sel);
-  if (rows.length === 0) return <Card><Empty title={t("incidents.list.empty.title")} hint={t("incidents.list.empty.hint")} /></Card>;
+  const lang = useLang();
+  const init = hashParams();
+  const [f, setF] = useState<Filters>({ range: "all", device: init.get("device") ?? "", type: "", confidence: "", unresolved: false });
+  const [data, setData] = useState<ListResp | null>(null);
+  const [rows, setRows] = useState<Row[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const [sel, setSel] = useState<string>(() => takePending());
+  /** 右边显示什么：一次故障的详情，或者某台设备的排查历史。 */
+  const [devView, setDevView] = useState<string>(init.get("view") === "history" ? init.get("device") ?? "" : "");
+
+  const fetchPage = (page: number, filters: Filters) => {
+    const q = new URLSearchParams({ range: filters.range, page: String(page), page_size: String(PAGE_SIZE) });
+    if (filters.device) q.set("device", filters.device);
+    if (filters.type) q.set("type", filters.type);
+    if (filters.confidence) q.set("confidence", filters.confidence);
+    if (filters.unresolved) q.set("unresolved", "1");
+    setBusy(true);
+    return fetch(`/api/incidents/list?${q}`)
+      .then((r) => (r.ok ? (r.json() as Promise<ListResp>) : Promise.reject()))
+      .then((d) => {
+        setFailed(false);
+        setData(d);
+        setRows((prev) => (page === 1 ? d.rows : [...prev, ...d.rows]));
+        if (page === 1) setSel((cur) => cur || d.rows[0]?.latest.incident_id || "");
+      })
+      .catch(() => setFailed(true))
+      .finally(() => setBusy(false));
+  };
+  useEffect(() => { fetchPage(1, f); }, [f]);
+
+  const set = (patch: Partial<Filters>) => setF((cur) => ({ ...cur, ...patch }));
+  const pick = (id: string) => {
+    setSel(id); setDevView("");
+    if (location.hash.includes("view=history")) history.replaceState(null, "", "#incidents");
+  };
+  const toggle = (fp: string) => setOpen((cur) => { const n = new Set(cur); n.has(fp) ? n.delete(fp) : n.add(fp); return n; });
+
+  if (!data && !failed) return <Loading />;
+  if (failed && !data) return <Card><Empty title={t("hist.list.loadFailed")} /></Card>;
+  const facets = data!.facets;
+  const noData = facets.in_range === 0 && f.range === "all" && !f.device;
+  if (noData) return <Card><Empty title={t("incidents.list.empty.title")} /></Card>;
+  const filtered = !!(f.device || f.type || f.confidence || f.unresolved);
+
+  // 按「这一行最近一次出现」的日期分组
+  const days: { key: string; head: string; rows: Row[] }[] = [];
+  for (const r of rows) {
+    const k = dayKey(r.latest.clock);
+    if (days[days.length - 1]?.key !== k) days.push({ key: k, head: dayHead(r.latest.clock, lang), rows: [] });
+    days[days.length - 1].rows.push(r);
+  }
+
   return (
-    <div className="flex items-start gap-5">
-      <div className="sticky top-[68px] w-80 shrink-0">
+    <div className="flex items-start gap-4">
+      <div className="sticky top-[68px] flex max-h-[calc(100vh-84px)] w-[23rem] shrink-0 flex-col xl:w-[26rem] min-[1920px]:w-[32rem]">
         <div className="mb-2 flex items-baseline justify-between px-1">
-          <span className="text-[13px] font-semibold tracking-wide text-slate-800">{t("incidents.list.title")}</span>
-          <span className="text-xs text-dim">{fill(t("incidents.list.countTemplate"), { n: rows.length })}</span>
+          <span className="text-[0.8125rem] font-semibold tracking-wide text-slate-800">{t("hist.list.title")}</span>
+          <span className="num text-xs text-dim">{fill(t("hist.list.count"), { n: data!.total_incidents, rows: data!.total_rows })}</span>
         </div>
-        <Card className="max-h-[calc(100vh-8rem)] divide-y divide-line overflow-y-auto">
-          {rows.map((r) => {
-            const ft = faultType(r), c = confMeta(r.confidence);
-            return (
-              <button key={r.incident_id} onClick={() => setSel(r.incident_id)}
-                className={cn("relative block w-full px-3.5 py-2.5 text-left transition", sel === r.incident_id ? "bg-brand/[0.07]" : "hover:bg-slate-50")}>
-                {sel === r.incident_id && <span className="absolute inset-y-0 left-0 w-[3px] bg-brand" />}
-                <div className="flex items-center gap-2 text-xs text-dim">
-                  <span className={cn("h-2 w-2 shrink-0 rounded-full", c.dot)} title={`${t(c.longKey)}：${t(c.hintKey)}`} />
-                  <span className="num">{ts(r.clock)}</span>
-                  <span className="num truncate font-medium text-slate-700">{r.host}</span>
-                  <Badge className={cn("ml-auto", ft.cls)}>{t(ft.labelKey)}</Badge>
-                </div>
-                <div className="mt-1.5 line-clamp-2 text-[13px] leading-snug text-slate-700"><AiText text={titleOf(r, 60)} lowPriority /></div>
-              </button>
-            );
-          })}
+
+        {/* 筛选条：时间范围 + 需人工一行，设备 / 类型 / 置信度一行。 */}
+        <Card className="mb-2 space-y-2 px-2.5 py-2">
+          <div className="flex items-center gap-2">
+            <Seg<Range> value={f.range} onChange={(v) => set({ range: v })}
+              items={[["24h", t("hist.range.24h")], ["7d", t("hist.range.7d")], ["30d", t("hist.range.30d")], ["all", t("hist.range.all")]]} />
+            <span className="ml-auto flex items-center gap-1">
+              <label className="flex cursor-pointer items-center gap-1.5 text-xs whitespace-nowrap text-slate-700">
+                <input type="checkbox" checked={f.unresolved} onChange={(e) => set({ unresolved: e.target.checked })} className="h-3.5 w-3.5 accent-[#0f5c7a]" />
+                {t("hist.filter.unresolved")}<span className="num text-dim">{facets.needs_human}</span>
+              </label>
+              <HelpTip text={t("hist.filter.unresolved.title")} />
+            </span>
+          </div>
+          <div className="grid grid-cols-[1fr_1fr_1fr_auto] items-center gap-1.5">
+            <select value={f.device} onChange={(e) => set({ device: e.target.value })} className={selCls} aria-label={t("hist.filter.device.all")}>
+              <option value="">{t("hist.filter.device.all")}</option>
+              {f.device && !facets.devices.some((d) => d.value === f.device) && <option value={f.device}>{f.device}</option>}
+              {facets.devices.map((d) => <option key={d.value} value={d.value}>{d.value} ({d.count})</option>)}
+            </select>
+            <select value={f.type} onChange={(e) => set({ type: e.target.value })} className={selCls} aria-label={t("hist.filter.type.all")}>
+              <option value="">{t("hist.filter.type.all")}</option>
+              {facets.types.map((x) => <option key={x.value} value={x.value}>{t(FAULT_KEY[x.value] ?? "faultType.other")} ({x.count})</option>)}
+            </select>
+            <select value={f.confidence} onChange={(e) => set({ confidence: e.target.value })} className={selCls} aria-label={t("hist.filter.conf.all")}>
+              <option value="">{t("hist.filter.conf.all")}</option>
+              {facets.confidence.map((x) => <option key={x.value} value={x.value}>{t(CONF_KEY[x.value] ?? "conf.none.label")} ({x.count})</option>)}
+            </select>
+            <button type="button" onClick={() => set({ device: "", type: "", confidence: "", unresolved: false })} disabled={!filtered}
+              className="px-1 text-xs text-brand hover:underline disabled:invisible">{t("hist.filter.reset")}</button>
+          </div>
+        </Card>
+
+        <Card className="min-h-0 flex-1 overflow-y-auto">
+          {rows.length === 0 ? <Empty title={t("hist.list.empty")} hint={t("hist.list.emptyHint")} /> : days.map((d) => (
+            <div key={d.key}>
+              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-[#f6f7f9] px-3 py-[3px] text-[0.6875rem] font-semibold text-slate-600">
+                <span className="num">{d.head}</span>
+                <span className="num font-normal text-dim">{d.rows.reduce((n, r) => n + r.count, 0)}</span>
+              </div>
+              {d.rows.map((r) => (
+                <ListRow key={r.fingerprint} r={r} sel={sel} devView={!!devView} open={open.has(r.fingerprint)} onPick={pick} onToggle={() => toggle(r.fingerprint)} />
+              ))}
+            </div>
+          ))}
+          {data!.has_more && (
+            <button type="button" disabled={busy} onClick={() => fetchPage(data!.page + 1, f)}
+              className="block w-full border-t border-line py-2 text-xs font-medium text-brand hover:bg-slate-50 disabled:text-dim">
+              {busy ? t("hist.list.loading") : fill(t("hist.list.loadMore"), { n: data!.total_rows - rows.length })}
+            </button>
+          )}
         </Card>
       </div>
 
-      {cur && <Detail cur={cur} />}
+      <div className="min-w-0 flex-1">
+        {devView ? (
+          <Card className="overflow-hidden">
+            <div className="flex min-h-[44px] items-center gap-3 border-b border-line bg-[#f6f7f9] px-4 py-2">
+              <Icon d={PATH.clock} className="text-slate-500" />
+              <span className="font-mono text-[0.9375rem] font-semibold text-slate-800">{devView}</span>
+              <span className="text-[0.8125rem] font-semibold text-slate-800">{t("hist.tab.history")}</span>
+              <HelpTip text={t("hist.dev.note")} />
+              {sel && <button type="button" onClick={() => pick(sel)} className="ml-auto shrink-0 text-xs font-medium text-brand hover:underline">{t("hist.dev.back")}</button>}
+            </div>
+            <DeviceHistory device={devView} currentId={sel} onPick={pick} />
+          </Card>
+        ) : sel ? <Detail id={sel} onPick={pick} onDevice={(d) => { setDevView(d); set({ device: d }); }} /> : null}
+      </div>
     </div>
   );
 }
 
-function Detail({ cur }: { cur: Inc }) {
+/** 列表一行：时间 · 置信度小方点 · 设备 · 类型 · 一句话结论（单行省略）· 合并 / 同类标记。 */
+function ListRow({ r, sel, devView, open, onPick, onToggle }: { r: Row; sel: string; devView: boolean; open: boolean; onPick: (id: string) => void; onToggle: () => void }) {
   const t = useT();
   const lang = useLang();
-  const [traceAll, setTraceAll] = useState(false);
+  const b = r.latest;
+  const c = confMeta(b.confidence);
+  const title = titleOf(b, 80);
+  const inGroup = r.occurrences.some((o) => o.incident_id === sel);
+  const on = !devView && (b.incident_id === sel || (inGroup && !open));
+  return (
+    <div className="border-b border-line last:border-b-0">
+      <div className={cn("relative flex items-center", on ? "bg-brand/[0.07]" : "hover:bg-slate-50")}>
+        {on && <span className="absolute inset-y-0 left-0 w-[3px] bg-brand" />}
+        <button type="button" onClick={() => onPick(b.incident_id)} title={title}
+          className="grid min-w-0 flex-1 grid-cols-[8px_36px_minmax(44px,auto)_auto_minmax(0,1fr)] items-center gap-x-2 py-[7px] pr-1 pl-3 text-left">
+          <span className={cn("h-2 w-2", c.dot)} title={`${t(c.longKey)}：${t(c.hintKey)}`} />
+          <span className="num text-xs text-dim">{hm(b.clock)}</span>
+          <span className="num max-w-[84px] truncate text-xs font-semibold text-slate-700">{r.devices.join("/") || b.host}</span>
+          <span className="rounded-[2px] px-1 text-[0.6875rem] leading-[16px] whitespace-nowrap text-slate-600 ring-1 ring-slate-300 ring-inset">{t(FAULT_KEY[r.fault_type] ?? "faultType.other")}</span>
+          <span className="min-w-0 truncate text-[0.8125rem] text-slate-800"><AiText text={title} lowPriority /></span>
+        </button>
+        <span className="flex shrink-0 items-center gap-1 pr-2">
+          {b.alert_count > 1 && (
+            <span className="num flex items-center gap-0.5 px-0.5 text-[0.6875rem] text-dim" title={MERGE_HINT(t, b.alert_count)}>
+              <svg viewBox="0 0 12 12" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.2"><path d="M2.5 4.5h6v5h-6zM4 2.5h6v5" /></svg>
+              {b.alert_count}
+            </span>
+          )}
+          {r.count > 1 && (
+            <button type="button" onClick={onToggle} title={fill(t("hist.row.sameTypeTitle"), { n: r.count })}
+              className={cn("num flex items-center gap-0.5 rounded-[2px] border px-1 text-[0.6875rem] leading-[16px] whitespace-nowrap",
+                open ? "border-brand bg-brand text-white" : "border-[#c3cad2] bg-white text-slate-700 hover:border-slate-400")}>
+              {fill(t("hist.row.sameType"), { n: r.count })}
+              <svg viewBox="0 0 12 12" className={cn("h-2.5 w-2.5 transition", open && "rotate-180")} fill="none" stroke="currentColor" strokeWidth="1.6"><path d="m3 4.5 3 3 3-3" /></svg>
+            </button>
+          )}
+        </span>
+      </div>
+      {open && (
+        <ol className="border-t border-line bg-[#f8f9fb] py-1">
+          {r.occurrences.map((o) => {
+            const oc = confMeta(o.confidence);
+            const active = !devView && o.incident_id === sel;
+            return (
+              <li key={o.incident_id}>
+                <button type="button" onClick={() => onPick(o.incident_id)}
+                  className={cn("relative grid w-full grid-cols-[10px_80px_8px_minmax(0,1fr)_auto] items-center gap-x-2 py-[5px] pr-3 pl-5 text-left text-xs",
+                    active ? "bg-brand/[0.08]" : "hover:bg-white")}>
+                  {active && <span className="absolute inset-y-0 left-0 w-[3px] bg-brand" />}
+                  <span className="h-full w-px justify-self-center bg-line" />
+                  <span className="num text-dim">{dayTime(o.clock, lang)}</span>
+                  <span className={cn("h-2 w-2", oc.dot)} title={t(oc.longKey)} />
+                  <span className={cn("truncate", o.consistent === false ? "text-amber-700" : "text-slate-600")} title={t("hist.occ.consistentTitle")}>
+                    {o.consistent === false ? t("hist.occ.inconsistent") : t("hist.occ.consistent")} · {t(oc.longKey)}
+                  </span>
+                  <span className="num text-dim">{fmtDur(t, o.elapsed_total)}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+type Tab = "conclusion" | "evidence" | "alerts" | "steps" | "hypotheses" | "history";
+
+function Detail({ id, onPick, onDevice }: { id: string; onPick: (id: string) => void; onDevice: (d: string) => void }) {
+  const t = useT();
+  const lang = useLang();
+  const [cur, setCur] = useState<Inc | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [tab, setTab] = useState<Tab>("conclusion");
   const [openStep, setOpenStep] = useState<number | null>(null);
-  useEffect(() => { setTraceAll(false); setOpenStep(null); }, [cur.incident_id]);
-  const traceShown = traceAll ? cur.trace : cur.trace.slice(0, 6);
-  const ft = faultType(cur), c = confMeta(cur.confidence), lvl = confLevel(cur.confidence);
+  useEffect(() => {
+    setFailed(false); setOpenStep(null);
+    fetch(`/api/incidents/${encodeURIComponent(id)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((x: Inc) => {
+        // 先登记这次故障涉及的告警编号再渲染：演示模式下理由正文里的裸编号也要遮
+        registerIds([...x.alerts.flatMap((a) => [a.eventid, a.caused_by]), ...(x.related ?? []).map((r) => r.eventid)]);
+        setCur(x);
+      })
+      .catch(() => setFailed(true));
+  }, [id]);
+  useEffect(() => { setTab((cur) => (cur === "history" ? cur : "conclusion")); }, [id]);
+  if (failed) return <Card><Empty title={t("hist.detail.loadFailed")} /></Card>;
+  if (!cur || cur.incident_id !== id) return <Loading />;
+
+  const ft = FAULT_KEY[cur.fault_type ?? "other"] ?? "faultType.other";
+  const c = confMeta(cur.confidence), lvl = confLevel(cur.confidence);
   const full = brief(cur.root_cause);
   const checks = Object.entries(cur.checklist ?? {}).filter(([, v]) => v && typeof v === "object");
+  const device = cur.devices?.[0] || cur.host.split(" / ")[0];
+  const violations = cur.rule_violations ?? [];
+  const tabs: [Tab, DictKey, number | null][] = [
+    ["conclusion", "hist.tab.conclusion", null],
+    ["evidence", "hist.tab.evidence", cur.evidence.length],
+    ["alerts", "hist.tab.alerts", cur.alerts.length],
+    ["steps", "hist.tab.steps", cur.trace.length],
+    ["hypotheses", "hist.tab.hypotheses", checks.length],
+    ["history", "hist.tab.history", null],
+  ];
+
   return (
-    <div className="min-w-0 flex-1 space-y-4">
-      {/* 第一层：这是什么故障、发生在哪、AI 怎么看。先给一句话，细节往下走。 */}
-      <Card className="overflow-hidden">
-        <div className="px-5 py-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge className={ft.cls}>{t(ft.labelKey)}</Badge>
-            <Badge className={c.badge} title={t(c.hintKey)}><span className={cn("h-1.5 w-1.5", c.dot)} />{t(c.longKey)}</Badge>
-            {(cur.repeat_count ?? 0) > 1 && <Badge className="bg-amber-50 text-amber-700 ring-amber-200" title={REPEAT_HINT(t, cur.repeat_count!)}>{fill(t("incidents.repeatBadge"), { n: cur.repeat_count! })}</Badge>}
-            {cur.alert_count > 1 && <Badge className="bg-white text-slate-700 ring-slate-300" title={MERGE_HINT(t, cur.alert_count)}>{fill(t("incidents.mergedBadge"), { n: cur.alert_count })}</Badge>}
-            {cur.feishu?.sent && <Badge className="bg-emerald-50 text-emerald-700 ring-emerald-200"><Icon d={PATH.check} className="h-3 w-3" />{t("incidents.feishuSent")}</Badge>}
+    <div className="space-y-3">
+      {/* 头：这是什么故障、在哪、AI 怎么看。只留一行标签 + 标题 + 一行元信息。 */}
+      <Card className="px-5 py-3.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge className="bg-white text-slate-700 ring-slate-300">{t(ft)}</Badge>
+          <Badge className={c.badge} title={t(c.hintKey)}><span className={cn("h-1.5 w-1.5", c.dot)} />{t(c.longKey)}</Badge>
+          {cur.needs_human && <span className="text-xs text-amber-700">{t("hist.detail.needsHuman")}</span>}
+          <span className="ml-auto flex items-center gap-2">
+            <button type="button" onClick={() => setTab("history")}
+              className="rounded-[3px] border border-line px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50">{t("hist.detail.viewHistory")}</button>
             <a href={`/api/records/${cur.alerts[0]?.eventid}/report.md`}
-              className="ml-auto rounded-[3px] border border-line px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50">{t("incidents.exportReport")}</a>
-          </div>
-          <h1 className="mt-2.5 text-[18px] leading-snug font-semibold text-slate-900"><AiText text={titleOf(cur, 70)} /></h1>
-          <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-dim">
-            <span>{t("incidents.meta.device")} <b className="num font-medium text-slate-800">{cur.host}</b></span>
-            <span>{t("incidents.meta.occurredAt")} <b className="num font-medium text-slate-800">{ts(cur.clock)}</b></span>
-            <span>{t("incidents.meta.elapsed")} <b className="num font-medium text-slate-800">{fmtDur(t, cur.elapsed_total)}</b></span>
-            <span>{t("incidents.meta.usage")} <b className="num font-medium text-slate-800">{(cur.token_cost?.total ?? 0).toLocaleString()}</b> token</span>
-            <span>{t("incidents.meta.id")} <b className="num font-medium text-slate-800" data-mask="id">{cur.fingerprint.slice(0, 12)}</b></span>
-          </div>
+              className="rounded-[3px] border border-line px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50">{t("incidents.exportReport")}</a>
+          </span>
+        </div>
+        <h1 className="mt-2 text-[1.0625rem] leading-snug font-semibold text-slate-900"><AiText text={titleOf(cur, 90)} /></h1>
+        <div className="mt-1.5 flex flex-wrap gap-x-5 gap-y-1 text-xs text-dim">
+          <span>{t("incidents.meta.device")} <b className="num font-medium text-slate-800">{cur.host}</b></span>
+          <span>{t("incidents.meta.occurredAt")} <b className="num font-medium text-slate-800">{ts(cur.clock)}</b></span>
+          <span>{t("incidents.meta.elapsed")} <b className="num font-medium text-slate-800">{fmtDur(t, cur.elapsed_total)}</b></span>
+          {cur.alert_count > 1 && <span title={MERGE_HINT(t, cur.alert_count)}>{fill(t("incidents.mergedBadge"), { n: cur.alert_count })}</span>}
+          {(cur.repeat_count ?? 0) > 1 && <span title={REPEAT_HINT(t, cur.repeat_count!)}>{fill(t("incidents.repeatBadge"), { n: cur.repeat_count! })}</span>}
         </div>
       </Card>
 
-      {/* 第二层：完整根因 + 置信度 + 处置建议，并排。 */}
-      <div className="grid grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] items-start gap-4">
-        <Card>
-          <CardHead title={t("incidents.rootCause.title")} note={t("incidents.rootCause.note")} icon={<Icon d={PATH.target} className="text-slate-500" />} />
-          <div className="px-5 py-4 text-sm leading-7 text-slate-700">
-            <AiInline text={full} />
-            {lang === "zh" && full !== cur.root_cause && <span className="text-slate-400">{cur.root_cause.slice(full.length)}</span>}
-          </div>
-          {(cur.related ?? []).length > 0 && (
-            <div className="mx-5 mb-4 rounded-[3px] border border-line border-l-2 border-l-brand bg-slate-50 px-3.5 py-2.5 text-[13px] leading-relaxed text-slate-800">
-              <div className="mb-0.5 font-semibold">{t("incidents.related.title")}</div>
-              {cur.related.map((r) => (
-                <div key={r.eventid}><span data-mask="id">#{r.eventid}</span> {r.host}：{r.link}<span className="text-slate-500">（<AiInline text={r.reason} />）</span></div>
-              ))}
-            </div>
-          )}
-        </Card>
-
-        <div className="space-y-4">
-          <Card>
-            <CardHead title={t("incidents.confidence.title")} icon={<Icon d={PATH.spark} className="text-slate-500" />} />
-            <div className="px-5 py-4">
-              <div className="flex items-baseline gap-2">
-                <span className={cn("text-[26px] leading-none font-semibold", lvl === 3 ? "text-emerald-600" : lvl === 2 ? "text-amber-600" : lvl === 1 ? "text-rose-600" : "text-slate-400")}>{t(c.labelKey)}</span>
-                <span className="text-sm text-dim">{lvl ? t("incidents.confidence.title") : ""}</span>
-              </div>
-              <div className="mt-3 flex gap-1.5">
-                {[1, 2, 3].map((k) => <span key={k} className={cn("h-1.5 flex-1", k <= lvl ? c.bar : "bg-slate-200")} />)}
-              </div>
-              <p className="mt-3 text-xs leading-relaxed text-dim">{t(c.hintKey)}</p>
-            </div>
-          </Card>
-          <Card className={cn(!cur.next_step && "hidden")}>
-            <CardHead title={t("incidents.nextStep.title")} icon={<Icon d={PATH.list} className="text-slate-500" />} />
-            <div className="px-5 py-4 text-sm leading-relaxed text-slate-700"><AiInline text={cur.next_step} /></div>
-          </Card>
+      <Card className="overflow-hidden">
+        {/* 页签：窄屏横向滚动，不折行。数字角标只是数量，不上色。 */}
+        <div className="flex overflow-x-auto border-b border-line bg-[#f6f7f9]" role="tablist">
+          {tabs.map(([k, label, n]) => (
+            <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+              className={cn("relative flex shrink-0 items-center gap-1.5 px-4 py-2.5 text-[0.8125rem] whitespace-nowrap transition",
+                tab === k ? "bg-white font-semibold text-slate-900" : "text-slate-600 hover:text-slate-900")}>
+              {tab === k && <span className="absolute inset-x-0 top-0 h-[2px] bg-brand" />}
+              {t(label)}
+              {n != null && <span className={cn("num rounded-[2px] px-1 text-[0.6875rem] leading-4", tab === k ? "bg-slate-200 text-slate-700" : "bg-slate-200/70 text-slate-500")}>{n}</span>}
+            </button>
+          ))}
         </div>
-      </div>
 
-      {/* 第三层：证据链。 */}
-      <Card>
-        <CardHead title={fill(t("incidents.evidence.titleTemplate"), { n: cur.evidence.length })} note={t("incidents.evidence.note")} icon={<Icon d={PATH.search} className="text-slate-500" />} />
-        {cur.evidence.length === 0 ? <Empty title={t("incidents.evidence.empty")} /> : (
+        {tab === "conclusion" && (
+          <div>
+            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+              <div className="px-5 py-4">
+                <div className="mb-1.5 text-xs font-semibold text-slate-500">{t("incidents.rootCause.title")}</div>
+                <div className="text-sm leading-7 text-slate-700">
+                  <AiInline text={full} />
+                  {lang === "zh" && full !== cur.root_cause && <span className="text-slate-400">{cur.root_cause.slice(full.length)}</span>}
+                </div>
+                {(cur.related ?? []).length > 0 && (
+                  <div className="mt-3 rounded-[3px] border border-line border-l-2 border-l-brand bg-slate-50 px-3.5 py-2.5 text-[0.8125rem] leading-relaxed text-slate-800">
+                    <div className="mb-0.5 font-semibold">{t("incidents.related.title")}</div>
+                    {cur.related.map((r) => (
+                      <div key={r.eventid}><span data-mask="id">#{r.eventid}</span> {r.host}：{r.link}<span className="text-slate-500">（<AiInline text={r.reason} />）</span></div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="divide-y divide-line border-t border-line xl:border-t-0 xl:border-l">
+                <div className="px-5 py-4">
+                  <div className="flex items-center gap-1 text-xs font-semibold text-slate-500">{t("incidents.confidence.title")}<HelpTip text={t(c.hintKey)} /></div>
+                  <div className={cn("mt-1.5 text-[1.375rem] leading-none font-semibold", lvl === 3 ? "text-emerald-600" : lvl === 2 ? "text-amber-600" : lvl === 1 ? "text-rose-600" : "text-slate-400")}>{t(c.labelKey)}</div>
+                  <div className="mt-2.5 flex gap-1.5">
+                    {[1, 2, 3].map((k) => <span key={k} className={cn("h-1.5 flex-1", k <= lvl ? c.bar : "bg-slate-200")} />)}
+                  </div>
+                </div>
+                {cur.next_step && (
+                  <div className="px-5 py-4">
+                    <div className="mb-1.5 text-xs font-semibold text-slate-500">{t("incidents.nextStep.title")}</div>
+                    <div className="text-sm leading-relaxed text-slate-700"><AiInline text={cur.next_step} /></div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <More cur={cur} violations={violations} />
+          </div>
+        )}
+
+        {tab === "evidence" && (cur.evidence.length === 0 ? <Empty title={t("incidents.evidence.empty")} /> : (
           <ol className="divide-y divide-line">
             {cur.evidence.map((e, i) => (
               <li key={i} className="flex gap-3 px-5 py-3">
-                <span className="num mt-0.5 flex h-5 w-6 shrink-0 items-center justify-center rounded-[2px] border border-line bg-slate-50 text-[11px] font-semibold text-slate-600">{i + 1}</span>
+                <span className="num mt-0.5 flex h-5 w-6 shrink-0 items-center justify-center rounded-[2px] border border-line bg-slate-50 text-[0.6875rem] font-semibold text-slate-600">{i + 1}</span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1 text-sm leading-relaxed text-slate-800"><AiInline text={e.claim} /></div>
@@ -192,13 +422,9 @@ function Detail({ cur }: { cur: Inc }) {
               </li>
             ))}
           </ol>
-        )}
-      </Card>
+        ))}
 
-      {/* 第四层：时间线（告警合并 + 取证轨迹）。 */}
-      <div className="grid grid-cols-2 items-start gap-4">
-        <Card>
-          <CardHead title={cur.alert_count > 1 ? fill(t("incidents.alertTimeline.mergedTemplate"), { n: cur.alert_count }) : t("incidents.alertTimeline.single")} icon={<Icon d={PATH.bell} className="text-slate-500" />} />
+        {tab === "alerts" && (
           <ol className="px-5 py-4">
             {cur.alerts.map((a, i) => (
               <li key={a.eventid} className="relative flex gap-3 pb-4 last:pb-0">
@@ -206,105 +432,155 @@ function Detail({ cur }: { cur: Inc }) {
                 <span className={cn("relative mt-1.5 h-[11px] w-[11px] shrink-0 rounded-full ring-2 ring-white", roleKey(a.role) === "root" ? "bg-rose-500" : "bg-slate-300")} />
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="num text-xs text-dim">{ts(a.clock)}</span>
                     <span className="text-sm font-medium text-slate-800">{a.name}</span>
                     <Badge className={ROLE_COLOR[roleKey(a.role)] ?? "bg-slate-100 text-slate-600 ring-slate-200"}>{(ROLE_KEY[roleKey(a.role)] && t(ROLE_KEY[roleKey(a.role)])) || a.role_cn || a.role || t("incidents.role.unlabeled")}</Badge>
                   </div>
-                  <div className="mt-0.5 text-xs leading-relaxed text-dim">
-                    <span className="num">{ts(a.clock)}</span>
-                    {a.caused_by && <> · {t("incidents.alertTimeline.causedBy")} <span data-mask="id">#{a.caused_by}</span> {t("incidents.alertTimeline.causedBySuffix")}</>}
-                    {a.reason && <> · <AiInline text={plain(a.reason)} /></>}
-                  </div>
+                  {(a.caused_by || a.reason) && (
+                    <div className="mt-0.5 text-xs leading-relaxed text-dim">
+                      {a.caused_by && <>{t("incidents.alertTimeline.causedBy")} <span data-mask="id">#{a.caused_by}</span> {t("incidents.alertTimeline.causedBySuffix")}</>}
+                      {a.caused_by && a.reason && " · "}
+                      {a.reason && <AiInline text={plain(a.reason)} />}
+                    </div>
+                  )}
                 </div>
               </li>
             ))}
           </ol>
-        </Card>
+        )}
 
-        <Card>
-          <CardHead title={fill(t("incidents.trace.titleTemplate"), { n: cur.trace.length })} note={t("incidents.trace.note")} icon={<Icon d={PATH.terminal} className="text-slate-500" />} />
-          {cur.trace.length === 0 ? <Empty title={t("incidents.trace.empty")} /> : (
-            <ol className="px-5 py-4">
-              {traceShown.map((step, i) => (
-                <li key={i} className="relative flex gap-3 pb-3 last:pb-0">
-                  {i < traceShown.length - 1 && <span className="absolute top-4 bottom-0 left-[5px] w-px bg-line" />}
-                  <span className={cn("relative mt-1.5 h-[11px] w-[11px] shrink-0 rounded-full ring-2 ring-white", step.ok ? "bg-emerald-500" : "bg-rose-500")} />
-                  <div className="min-w-0 flex-1">
-                    <button onClick={() => setOpenStep(openStep === i ? null : i)} className="flex w-full items-center gap-2 text-left">
-                      <span title={step.tool} className="text-[13px] font-medium text-slate-800">{stepLabel(t, step)}</span>
-                      {!step.ok && <Badge className="bg-rose-50 text-rose-700 ring-rose-200">{t("incidents.trace.failed")}</Badge>}
-                      {step.elapsed_ms != null && <span className="num text-xs text-slate-500">{step.elapsed_ms >= 1000 ? `${(step.elapsed_ms / 1000).toFixed(1)}${t("incidents.trace.seconds")}` : `${step.elapsed_ms}${t("incidents.trace.ms")}`}</span>}
-                      <span className="ml-auto shrink-0 text-xs text-brand">{openStep === i ? t("incidents.trace.collapse") : t("incidents.trace.expand")}</span>
-                    </button>
-                    <div className="truncate font-mono text-xs text-dim">
-                      {typeof step.args === "object" ? Object.values(step.args ?? {}).flat().filter((x) => x !== "").join(" · ") : String(step.args)}
+        {tab === "steps" && (cur.trace.length === 0 ? <Empty title={t("incidents.trace.empty")} /> : (
+          <ol className="divide-y divide-line">
+            {cur.trace.map((step, i) => (
+              <li key={i}>
+                <button type="button" onClick={() => setOpenStep(openStep === i ? null : i)}
+                  className="grid w-full grid-cols-[24px_8px_minmax(0,auto)_minmax(0,1fr)_auto_auto] items-center gap-x-2.5 px-5 py-2 text-left hover:bg-slate-50">
+                  <span className="num text-xs text-dim">{i + 1}</span>
+                  <span className={cn("h-2 w-2", step.ok ? "bg-emerald-500" : "bg-rose-500")} title={step.ok ? "ok" : t("incidents.trace.failed")} />
+                  <span title={step.tool} className="truncate text-[0.8125rem] font-medium text-slate-800">{stepLabel(t, step)}</span>
+                  <span className="truncate font-mono text-xs text-dim">
+                    {typeof step.args === "object" ? Object.values(step.args ?? {}).flat().filter((x) => x !== "").join(" · ") : String(step.args)}
+                  </span>
+                  <span className="num text-xs text-slate-500">{step.elapsed_ms == null ? "" : step.elapsed_ms >= 1000 ? `${(step.elapsed_ms / 1000).toFixed(1)}${t("incidents.trace.seconds")}` : `${step.elapsed_ms}${t("incidents.trace.ms")}`}</span>
+                  <span className="shrink-0 text-xs text-brand">{openStep === i ? t("incidents.trace.collapse") : t("incidents.trace.expand")}</span>
+                </button>
+                {openStep === i && (
+                  <div className="mx-5 mb-3 space-y-2 rounded-[3px] border border-line bg-slate-50 p-3">
+                    <div>
+                      <div className="mb-1 text-xs font-medium text-slate-500">{t("incidents.trace.args")}</div>
+                      <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs text-slate-700">{JSON.stringify(step.args ?? {}, null, 2)}</pre>
                     </div>
-                    {openStep === i && (
-                      <div className="mt-2 space-y-2 rounded-[3px] border border-line bg-slate-50 p-3">
-                        <div>
-                          <div className="mb-1 text-xs font-medium text-slate-500">{t("incidents.trace.args")}</div>
-                          <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs text-slate-700">{JSON.stringify(step.args ?? {}, null, 2)}</pre>
-                        </div>
-                        <div>
-                          <div className="mb-1 text-xs font-medium text-slate-500">{step.ok ? t("incidents.trace.result") : t("incidents.trace.failReason")}</div>
-                          {step.result !== undefined ? (
-                            <pre className="term max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md p-2.5 text-xs">
-                              {typeof step.result === "string" ? step.result : JSON.stringify(step.result, null, 2)}
-                            </pre>
-                          ) : step.error ? (
-                            <pre className="term max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md p-2.5 text-xs text-rose-300">{step.error}</pre>
-                          ) : (
-                            <div className="text-xs text-dim">{t("incidents.trace.noResult")}</div>
-                          )}
-                        </div>
-                      </div>
-                    )}
+                    <div>
+                      <div className="mb-1 text-xs font-medium text-slate-500">{step.ok ? t("incidents.trace.result") : t("incidents.trace.failReason")}</div>
+                      {step.result !== undefined ? (
+                        <pre className="term max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-[2px] p-2.5 text-xs">
+                          {typeof step.result === "string" ? step.result : JSON.stringify(step.result, null, 2)}
+                        </pre>
+                      ) : step.error ? (
+                        <pre className="term max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-[2px] p-2.5 text-xs text-rose-300">{step.error}</pre>
+                      ) : (
+                        <div className="text-xs text-dim">{t("incidents.trace.noResult")}</div>
+                      )}
+                    </div>
                   </div>
-                </li>
-              ))}
-              {cur.trace.length > 6 && (
-                <li><button onClick={() => setTraceAll(!traceAll)} className="ml-6 text-xs font-medium text-brand hover:underline">
-                  {traceAll ? t("incidents.trace.collapseList") : fill(t("incidents.trace.expandListTemplate"), { n: cur.trace.length - 6 })}
-                </button></li>
-              )}
-            </ol>
-          )}
-        </Card>
-      </div>
-
-      {checks.length > 0 && (
-        <Card>
-          <CardHead title={t("incidents.checklist.title")} note={t("incidents.checklist.note")} icon={<Icon d={PATH.list} className="text-slate-500" />} />
-          <div className="grid grid-cols-2 divide-x divide-y divide-line">
-            {checks.map(([k, v]) => (
-              <div key={k} className="px-5 py-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-slate-800">{(CHECK_KEY[k] && t(CHECK_KEY[k])) || k}</span>
-                  <Badge className={checkTone(v.status)}>{(STATUS_KEY[v.status] && t(STATUS_KEY[v.status])) || v.status}</Badge>
-                </div>
-                <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-dim" title={v.reason}><AiText text={plain(v.reason)} /></p>
-              </div>
+                )}
+              </li>
             ))}
-          </div>
-        </Card>
-      )}
+          </ol>
+        ))}
 
-      {cur.undistinguishable.length > 0 && (
-        <Card>
-          <CardHead title={t("incidents.undistinguishable.title")} note={t("incidents.undistinguishable.note")} icon={<Icon d={PATH.list} className="text-slate-500" />} />
-          <div className="divide-y divide-line">
-            {cur.undistinguishable.map((u: any, i: number) => (
-              <div key={i} className="px-5 py-3.5 text-sm">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {(u.candidates ?? []).map((c: string, j: number) => (
-                    <Badge key={c} title={u.candidate_codes?.[j] || c} className="bg-amber-50 text-amber-700 ring-amber-200">{c}</Badge>
+        {tab === "hypotheses" && (
+          <div>
+            {checks.length === 0 ? <Empty title={t("hist.hypotheses.empty")} /> : (
+              <>
+                <div className="grid grid-cols-1 divide-line md:grid-cols-2 [&>*]:border-b [&>*]:border-line md:[&>*:nth-child(odd)]:border-r">
+                  {checks.map(([k, v]) => (
+                    <div key={k} className="px-5 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-slate-800">{(CHECK_KEY[k] && t(CHECK_KEY[k])) || k}</span>
+                        <Badge className={checkTone(v.status)}>{(STATUS_KEY[v.status] && t(STATUS_KEY[v.status])) || v.status}</Badge>
+                      </div>
+                      <p className="mt-1 text-xs leading-relaxed text-dim"><AiText text={plain(v.reason)} /></p>
+                    </div>
                   ))}
                 </div>
-                {u.why_indistinguishable && <div className="mt-2 text-[13px] leading-relaxed text-slate-600"><AiInline text={u.why_indistinguishable} /></div>}
-                {u.what_data_would_help && <div className="mt-1.5 text-[13px] leading-relaxed text-amber-700">{t("incidents.undistinguishable.missingLabel")}<AiInline text={u.what_data_would_help} /></div>}
+              </>
+            )}
+            {cur.undistinguishable.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1 border-b border-line bg-[#f6f7f9] px-5 py-2 text-[0.8125rem] font-semibold text-slate-800">
+                  {t("incidents.undistinguishable.title")}<HelpTip text={t("incidents.undistinguishable.note")} />
+                </div>
+                <div className="divide-y divide-line">
+                  {cur.undistinguishable.map((u: any, i: number) => (
+                    <div key={i} className="px-5 py-3 text-sm">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {(u.candidates ?? []).map((cnd: string, j: number) => (
+                          <Badge key={cnd} title={u.candidate_codes?.[j] || cnd} className="bg-amber-50 text-amber-700 ring-amber-200">{cnd}</Badge>
+                        ))}
+                      </div>
+                      {u.why_indistinguishable && <div className="mt-2 text-[0.8125rem] leading-relaxed text-slate-600"><AiInline text={u.why_indistinguishable} /></div>}
+                      {u.what_data_would_help && <div className="mt-1.5 text-[0.8125rem] leading-relaxed text-amber-700">{t("incidents.undistinguishable.missingLabel")}<AiInline text={u.what_data_would_help} /></div>}
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
+            )}
           </div>
-        </Card>
+        )}
+
+        {tab === "history" && (
+          <div>
+            <div className="flex items-center gap-2 border-b border-line px-4 py-2 text-xs text-dim">
+              <span className="font-mono font-semibold text-slate-800">{device}</span>
+              <HelpTip text={t("hist.dev.note")} />
+              <button type="button" onClick={() => onDevice(device)} className="ml-auto shrink-0 font-medium text-brand hover:underline">{t("hist.dev.openWide")}</button>
+            </div>
+            <DeviceHistory device={device} currentId={cur.incident_id} onPick={onPick} />
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/** 「更多信息」：token 用量、编号、指纹、推送状态、系统标出的矛盾。默认收起，矛盾条数露在标题上。 */
+function More({ cur, violations }: { cur: Inc; violations: string[] }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  useEffect(() => setOpen(false), [cur.incident_id]);
+  const tc = cur.token_cost ?? { forensics: 0, analysis: 0, other: 0, total: 0 };
+  const rows: [DictKey, ReactNode, boolean?][] = [
+    ["hist.more.tokens", <>{(tc.total ?? 0).toLocaleString()} <span className="text-dim">({fill(t("hist.more.tokenSplit"), { f: tc.forensics.toLocaleString(), a: tc.analysis.toLocaleString(), o: tc.other.toLocaleString() })})</span></>],
+    ["hist.more.incidentId", cur.incident_id, true],
+    ["hist.more.fingerprint", cur.fingerprint, true],
+    ["hist.more.eventids", cur.alerts.map((a) => a.eventid).join(", "), true],
+    ["hist.more.feishu", cur.feishu?.sent ? t("hist.more.feishuSent") : t("hist.more.feishuNo")],
+  ];
+  return (
+    <div className="border-t border-line">
+      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center gap-2 px-5 py-2 text-left text-xs text-slate-600 hover:bg-slate-50">
+        <svg viewBox="0 0 12 12" className={cn("h-2.5 w-2.5 transition", open && "rotate-90")} fill="none" stroke="currentColor" strokeWidth="1.6"><path d="m4.5 3 3 3-3 3" /></svg>
+        <span className="font-medium">{t("hist.more")}</span>
+        {violations.length > 0 && <span className="text-amber-700">{fill(t("hist.more.violations"), { n: violations.length })}</span>}
+      </button>
+      {open && (
+        <div className="space-y-3 px-5 pb-4">
+          <dl className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
+            {rows.map(([k, v, id]) => (
+              <Fragment key={k}>
+                <dt className="text-dim">{t(k)}</dt>
+                <dd className="num break-all text-slate-700" data-mask={id ? "id" : undefined}>{v}</dd>
+              </Fragment>
+            ))}
+          </dl>
+          {violations.length > 0 && (
+            <div className="rounded-[3px] border border-amber-200 border-l-2 border-l-amber-500 bg-amber-50/60 px-3.5 py-2.5 text-xs leading-relaxed text-slate-700">
+              <div className="mb-1 flex items-center gap-1 font-semibold text-amber-800">{t("hist.more.violationsTitle")}<HelpTip text={t("hist.more.violationsNote")} /></div>
+              <ul className="list-disc space-y-0.5 pl-4">{violations.map((v) => <li key={v}><AiInline text={v} /></li>)}</ul>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

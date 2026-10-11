@@ -94,13 +94,14 @@ class TestWidgetRules(Base):
     def test_提示泡去重(self):
         d = P.apply_patch(P.empty_draft(), {"add_devices": ["V1"], "add_checks": [{"template": "interface_errors", "devices": None}]}, self.topo)
         d["schedule"] = {"every_minutes": 60}
-        first = W.hints_for(d, shown=[], opening=True)
-        self.assertEqual(len(first), 2)
-        second = W.hints_for(d, shown=[h["id"] for h in first])
-        self.assertTrue(second)
-        self.assertFalse({h["id"] for h in first} & {h["id"] for h in second})
-        third = W.hints_for(d, shown=[h["id"] for h in first + second])
-        self.assertEqual(third, [])
+        shown: list[str] = []
+        for opening in (True, False, False, False, False):
+            batch = W.hints_for(d, shown=shown, opening=opening)
+            self.assertLessEqual(len(batch), W.MAX_HINTS_PER_TURN)
+            self.assertFalse({h["id"] for h in batch} & set(shown))  # 出现过的不再出
+            shown += [h["id"] for h in batch]
+        self.assertEqual(W.hints_for(d, shown=shown), [])
+        self.assertEqual(set(shown), {"readonly", "core-ospf-bgp", "counter-interval", "dryrun", "trend-runs"})
 
 
 class TestRescope(Base):

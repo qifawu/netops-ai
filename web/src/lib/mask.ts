@@ -21,9 +21,13 @@ export const isMask = () => {
 const IPV4 = /(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?!\d|\.\d)/g;
 const MAC = /\b(?:[0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4}|(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2})\b/gi;
 const HASH_EVENT = /#(\d{5,})/g;
-const EVENT_KV = /(eventid[=:：\s]*)(\d{5,})/gi;
+const EVENT_KV = /((?:eventid|hostid)[=:：\s]*)(\d{5,})/gi;
 const ALERT_LIST = /((?:告警|事件)\s*)((?:\d{5,}[、,，\s]*)+)/g;
 const CHAT_ID = /(对话\s*)(\d{6,})/g;
+/** 调查步骤「原始返回」是 JSON：`"eventid": "312914"` 这种带引号的写法上面几条都匹配不到。 */
+const JSON_ID = /("(?:eventid|hostid|objectid|triggerid|itemid|r_eventid|c_eventid)"\s*:\s*"?)(\d{4,})/gi;
+/** 写成网段的半截地址（`10.0.1.x`、`10.0.0.*`）也能看出真实网段，前缀一并换成文档地址段。 */
+const IP_PREFIX = /(?<![\d.])(?:\d{1,3}\.){2,3}(?=[xX*](?![\w]))/g;
 
 const ipMap = new Map<string, string>();
 const fakeIp = (real: string) => {
@@ -37,6 +41,14 @@ const fakeIp = (real: string) => {
 };
 const tail = (s: string) => "***" + s.slice(-2);
 
+/** 已知的告警编号：结论 / 理由里常有不带 `#`、不带「告警」字样的裸编号（「由 312914 对应的动作引起」），
+ *  正则分不出它是编号还是别的数字，所以由页面在拿到数据时把这次故障的告警编号登记进来，见到就遮。 */
+const knownIds = new Set<string>();
+export function registerIds(ids: (string | number | null | undefined)[]) {
+  for (const x of ids) if (x != null && /^\d{4,}$/.test(String(x))) knownIds.add(String(x));
+}
+const BARE_NUM = /(?<![\d.])\d{4,}(?![\d.])/g;
+
 export function maskText(s: string, asId = false): string {
   if (!s) return s;
   if (asId) return s.replace(/[0-9a-zA-Z]{5,}/g, (m) => tail(m));
@@ -46,7 +58,10 @@ export function maskText(s: string, asId = false): string {
     .replace(HASH_EVENT, (_, d) => "#" + tail(d))
     .replace(EVENT_KV, (_, k, d) => k + tail(d))
     .replace(ALERT_LIST, (_, k, list: string) => k + list.replace(/\d{5,}/g, (d) => tail(d)))
-    .replace(CHAT_ID, (_, k, d) => k + tail(d));
+    .replace(CHAT_ID, (_, k, d) => k + tail(d))
+    .replace(JSON_ID, (_, k, d) => k + tail(d))
+    .replace(IP_PREFIX, (m) => (m.split(".").length === 4 ? "192.0.2." : "192.0."))
+    .replace(BARE_NUM, (m) => (knownIds.has(m) ? tail(m) : m));
 }
 
 type Rec = { orig: string; masked: string };

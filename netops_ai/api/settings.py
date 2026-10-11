@@ -10,11 +10,9 @@
   （很多是数字/开关，清空 = 用代码默认值）。
 - 原子写 `.env`：先写临时文件、`os.replace()`，不会在异常中途截断成半个文件。
 
-已知两个"改 .env 不会立刻生效"的例外，见 `KNOWN_CAVEATS`：
+已知一个"改 .env 不会立刻生效"的例外，见 `KNOWN_CAVEATS`：
 - `TOPOLOGY_CACHE_TTL`：`topology.py::_cache_ttl()` 直接读 `os.environ`，不经过
   `_load_dotenv()` 合并，只有真进程环境变量能改它，写 `.env` 文件本身没用。
-- `SCHEDULE_INTERVAL_MINUTES`：只在 FastAPI 启动时读一次（`schedule.start()`），
-  定时线程把分钟数摄进闭包里，改 `.env` 要重启进程才会用上新值。
 """
 
 from __future__ import annotations
@@ -137,7 +135,7 @@ FIELDS: tuple[SettingField, ...] = (
         "SCHEDULE_INTERVAL_MINUTES", "定时任务间隔（分钟）", "runtime", "schedule",
         "每隔多少分钟跑一轮：巡检 + 给拓扑里每台设备存一份配置快照（下次告警的「故障前」对比）；不配或 0 就不开",
         numeric=True,
-        note="已知限制：只在进程启动时读一次并把分钟数摄进定时线程的闭包里，改 .env 后要重启 8000 端口的进程才会用上新值（不影响手动触发 POST /api/schedule/run）",
+        note="定时线程每轮现读这个值，改了下一轮就按新周期走，不用重启；巡检页「基础巡检」里也能直接改",
     ),
 )
 

@@ -100,6 +100,14 @@ html {
   -webkit-font-smoothing: antialiased;
 }
 body { background: var(--color-page); color: var(--color-ink); }
+
+/* **大屏适配**：页面内容统一用 `.page-wrap` 居中，宽度按断点放宽；≥1920 / ≥2560 再把根字号调大一档，
+   rem 写的尺寸（Tailwind 的 text-xs/sm、间距，以及从 px 换算成 rem 的字号）跟着一起放大。
+   1440 及以下保持原样：1280 宽、16px。侧边栏是固定宽度，不跟着屏幕拉伸。 */
+.page-wrap { margin-inline: auto; max-width: 1280px; }
+@media (min-width: 1536px) { .page-wrap { max-width: 1560px; } }
+@media (min-width: 1920px) { html { font-size: 17px; } .page-wrap { max-width: 1800px; } }
+@media (min-width: 2560px) { html { font-size: 18.5px; } .page-wrap { max-width: 2200px; } }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: #b9c1c9; border-radius: 0; }
 ::-webkit-scrollbar-thumb:hover { background: #8e98a3; }

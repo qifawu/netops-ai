@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../lib/api";
 import { Badge, Card, CardHead, Empty, Icon, Loading, PATH, SectionTitle } from "../lib/ui";
 import { fill, useT, type DictKey } from "../lib/i18n";
+import HelpTip from "../lib/HelpTip";
 import {
   TONE_CLASS, fetchOverview, fmtBytes, hashParam, sectionOf, shortTitle, versionTone,
   type KbDoc, type KbExpression, type KbHit, type KbOverview, type KbSearch,
@@ -61,31 +62,26 @@ export default function Knowledge() {
   const n159 = docs.filter((d) => versionTone(d.version) === "match").length;
 
   return (
-    <div className="mx-auto max-w-[1180px] space-y-5">
-      <p className="text-sm leading-relaxed text-slate-600">
-        {t("kb.intro")}
-        <b className="font-semibold text-slate-800">{t("kb.introBold")}</b>。
-      </p>
-
+    <div className="page-wrap space-y-5">
       <div className="grid grid-cols-3 gap-4">
         <Stat label={t("kb.stat.docCount")} value={ov ? String(ov.doc_count) : "—"} note={ov ? fill(t("kb.stat.docCount.noteTemplate"), {
           size: fmtBytes(ov.db_size_bytes),
           modified: ov.db_modified ? fill(t("kb.stat.docCount.modifiedTemplate"), { date: new Date(ov.db_modified * 1000).toLocaleDateString("zh-CN") }) : "",
         }) : t("kb.stat.docCount.emptyNote")} />
-        <Stat label={t("kb.stat.chunkCount")} value={ov ? ov.chunk_count.toLocaleString() : "—"} note={t("kb.stat.chunkCount.note")} />
-        <Stat label={t("kb.stat.searchMethod")} value={t("kb.stat.searchMethod.value")} note={t("kb.stat.searchMethod.note")} accent />
+        <Stat label={t("kb.stat.chunkCount")} value={ov ? ov.chunk_count.toLocaleString() : "—"} />
+        <Stat label={t("kb.stat.searchMethod")} value={t("kb.stat.searchMethod.value")} accent />
       </div>
 
       {/* 检索试验台：这页最重要的东西，放在最显眼的位置。 */}
       <Card className="overflow-hidden">
-        <CardHead title={t("kb.playground.title")} note={t("kb.playground.note")} icon={<Icon d={PATH.search} className="text-slate-500" />} />
+        <CardHead title={t("kb.playground.title")} right={<HelpTip text={t("kb.playground.help")} />} icon={<Icon d={PATH.search} className="text-slate-500" />} />
         <div className="space-y-3 px-5 py-4">
           <div className="flex gap-2">
             <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && run(q)}
               placeholder={t("kb.playground.placeholder")}
               className="flex-1 rounded-xl border border-line bg-white px-4 py-2.5 text-sm outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15" />
             <button onClick={() => run(q)} disabled={busy || !q.trim()}
-              className="rounded-[3px] bg-brand px-5 text-[13px] font-medium text-white transition hover:bg-[#0b4a63] disabled:opacity-40">
+              className="rounded-[3px] bg-brand px-5 text-[0.8125rem] font-medium text-white transition hover:bg-[#0b4a63] disabled:opacity-40">
               {busy ? t("kb.playground.searching") : t("kb.playground.search")}
             </button>
           </div>
@@ -126,12 +122,12 @@ export default function Knowledge() {
   );
 }
 
-function Stat({ label, value, note, accent }: { label: string; value: string; note: string; accent?: boolean }) {
+function Stat({ label, value, note, accent }: { label: string; value: string; note?: string; accent?: boolean }) {
   return (
     <Card className="px-5 py-4">
       <div className="text-xs text-dim">{label}</div>
-      <div className={cn("num mt-1 text-[22px] leading-tight font-semibold", accent ? "text-brand" : "text-slate-900")}>{value}</div>
-      <div className="mt-1 text-xs leading-relaxed text-dim">{note}</div>
+      <div className={cn("num mt-1 text-[1.375rem] leading-tight font-semibold", accent ? "text-brand" : "text-slate-900")}>{value}</div>
+      {note && <div className="mt-1 text-xs leading-relaxed text-dim">{note}</div>}
     </Card>
   );
 }
@@ -154,7 +150,7 @@ function ExprLine({ ex, count }: { ex: KbExpression; count: number }) {
       <div className="flex flex-wrap items-center gap-1.5">
         <span>{t("kb.expr.terms")}</span>
         {ex.tokens.map((tok) => (
-          <code key={tok} className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-700">{tok}</code>
+          <code key={tok} className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[0.6875rem] text-slate-700">{tok}</code>
         ))}
       </div>
     </div>
@@ -227,7 +223,7 @@ function ResultCard({ hit, tokens }: { hit: KbHit; tokens: string[] }) {
           {sec && <span className="text-slate-500"> › {sec}</span>}
         </div>
       </div>
-      <p className="mt-2 max-h-44 overflow-y-auto rounded-lg bg-slate-50 px-3 py-2 text-[13px] leading-relaxed break-words whitespace-pre-line text-slate-700">
+      <p className="mt-2 max-h-44 overflow-y-auto rounded-lg bg-slate-50 px-3 py-2 text-[0.8125rem] leading-relaxed break-words whitespace-pre-line text-slate-700">
         <Highlight text={hit.snippet.replace(/\n\s*\n+/g, "\n").trim()} tokens={tokens} />
       </p>
       <div className="mt-2.5 flex flex-wrap items-center gap-2">

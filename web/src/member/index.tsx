@@ -3,7 +3,7 @@
 import type { FC, ReactNode } from "react";
 import type { DictKey } from "../lib/i18n";
 
-export type NavItem = { key: string; labelKey: DictKey; descKey: DictKey; page: FC; group: DictKey; after?: string };
+export type NavItem = { key: string; labelKey: DictKey; page: FC; group: DictKey; after?: string };
 
 export const AuthGate = ({ children }: { children: ReactNode }) => <>{children}</>;
 export const UserMenu = () => null;

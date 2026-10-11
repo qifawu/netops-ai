@@ -1,7 +1,8 @@
 """定时任务：隔 `SCHEDULE_INTERVAL_MINUTES` 分钟跑一轮巡检，并给每台设备存一份配置（A13 的「故障前」）。
 
 一个守护线程，不引调度库。处置建议要调模型花钱，不在这里跑。
-每轮结果写 `records/schedule-state.json`，头区状态点读它。
+每轮结果写 `records/schedule-state.json`，头区状态点读它。周期每次现读 `SCHEDULE_INTERVAL_MINUTES`
+（基础巡检页可以直接改），改了下一轮就按新值走；0 = 关闭。
 
 **巡检计划**（`inspection-plans/*.yaml`，网页上对话制定的）走旁边另一个守护线程：每分钟看一眼哪些已启用的计划到点了，
 到点的各起一个线程去跑（同一个计划不重入），结果存 `records/checklist-runs/`，状态写进同一个 schedule-state 的
@@ -13,7 +14,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from . import dashboard
@@ -165,7 +166,7 @@ def plans_status() -> tuple[int, bool, str]:
     st = (load_state() or {}).get("plans") or {}
     ran = {n: st[n] for n in enabled if n in st}
     ok = all(e.get("ok") for e in ran.values())
-    note = f"巡检计划 {len(enabled)} 个启用" + ("：" + "；".join(f"{n} {e.get('note', '')}" for n, e in ran.items()) if ran else "，还没跑过")
+    note = f"自定义巡检 {len(enabled)} 个启用" + ("：" + "；".join(f"{n} {e.get('note', '')}" for n, e in ran.items()) if ran else "，还没跑过")
     return len(enabled), ok, note
 
 
@@ -193,18 +194,67 @@ def interval_minutes(env: dict) -> int:
         return 0
 
 
+#: 基础巡检线程隔多久看一次「到点没有」。周期本身每次现读 SCHEDULE_INTERVAL_MINUTES，改了下一轮就按新值走，不用重启。
+BASIC_TICK_SECONDS = 30
+#: 基础巡检线程启动的时刻：进程刚起来时按老行为先等满一个周期，不因为 schedule-state 里的旧时间立刻补跑。
+_basic_started_at: datetime | None = None
+_last_basic_attempt: datetime | None = None
+
+
+def _parse_at(v: object) -> datetime | None:
+    if not v:
+        return None
+    try:
+        t = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def last_basic_run_at(state: dict | None = None) -> datetime | None:
+    """上一轮基础巡检（巡检 + 配置快照）开始的时间：schedule-state 里有 jobs 的那份 `at`。"""
+    st = load_state() if state is None else state
+    return _parse_at(st.get("at")) if st and st.get("jobs") else None
+
+
+def next_basic_run(env: dict | None = None, *, state: dict | None = None) -> datetime | None:
+    """下一轮基础巡检的时间；周期为 0（关闭）返回 None。锚点 = 上一轮、本进程线程启动、上一次尝试里最晚的那个。"""
+    minutes = interval_minutes(env if env is not None else dashboard._env())
+    if not minutes:
+        return None
+    anchors = [t for t in (last_basic_run_at(state), _basic_started_at, _last_basic_attempt) if t is not None]
+    if not anchors:
+        return None
+    return max(anchors) + timedelta(minutes=minutes)
+
+
+def basic_tick(now: datetime | None = None, runner: Callable[[], object] | None = None) -> bool:
+    """到点就跑一轮（巡检 + 配置快照，跟以前一样）。时钟和执行函数可注入。返回这次跑没跑。"""
+    global _last_basic_attempt
+    now = now or datetime.now(timezone.utc)
+    nxt = next_basic_run()
+    if nxt is None or now < nxt:
+        return False
+    _last_basic_attempt = now
+    (runner or run_once)()
+    return True
+
+
 def start() -> None:
-    """FastAPI 启动时调一次。没配间隔就什么都不做。"""
-    global _started
+    """FastAPI 启动时调一次。基础巡检线程总是起着：周期为 0 时什么都不做，之后在页面上打开也能生效。"""
+    global _started, _basic_started_at
     start_plans()
-    minutes = interval_minutes(dashboard._env())
-    if _started or not minutes:
+    if _started:
         return
     _started = True
+    _basic_started_at = datetime.now(timezone.utc)
 
     def loop() -> None:
         while True:
-            time.sleep(minutes * 60)
-            run_once()
+            time.sleep(BASIC_TICK_SECONDS)
+            try:
+                basic_tick()
+            except Exception:  # noqa: BLE001 - 线程不能因为一次异常就死掉
+                pass
 
     threading.Thread(target=loop, name="netops-schedule", daemon=True).start()

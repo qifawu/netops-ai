@@ -23,7 +23,7 @@ export function Notice({ tone, children }: { tone: "indigo" | "amber" | "rose" |
     rose: "bg-rose-50 text-rose-800 ring-rose-200",
     emerald: "bg-emerald-50 text-emerald-800 ring-emerald-200",
   }[tone];
-  return <div className={cn("rounded-[3px] px-4 py-2.5 text-[13px] leading-relaxed ring-1", cls)}>{children}</div>;
+  return <div className={cn("rounded-[3px] px-4 py-2.5 text-[0.8125rem] leading-relaxed ring-1", cls)}>{children}</div>;
 }
 
 export function Btn({ children, onClick, tone = "plain", busy, disabled, small, title }: {
@@ -35,7 +35,7 @@ export function Btn({ children, onClick, tone = "plain", busy, disabled, small, 
   }[tone];
   return (
     <button onClick={onClick} disabled={disabled} title={title}
-      className={cn("inline-flex items-center gap-1.5 rounded-[3px] font-medium whitespace-nowrap ring-1 ring-inset transition disabled:cursor-not-allowed disabled:opacity-45", small ? "px-2 py-[3px] text-xs" : "px-3 py-1.5 text-[13px]", t)}>
+      className={cn("inline-flex items-center gap-1.5 rounded-[3px] font-medium whitespace-nowrap ring-1 ring-inset transition disabled:cursor-not-allowed disabled:opacity-45", small ? "px-2 py-[3px] text-xs" : "px-3 py-1.5 text-[0.8125rem]", t)}>
       {busy && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />}
       {children}
     </button>

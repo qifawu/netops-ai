@@ -658,7 +658,7 @@ def _schedule_status(cfg: dict) -> dict:
         n_plans, plans_ok, plans_note = 0, True, ""
     if not minutes:
         if n_plans:  # 内置定时巡检没开，但有启用的巡检计划
-            return {"key": "schedule", "label": f"巡检计划 {n_plans} 个启用", "ok": plans_ok, "note": plans_note}
+            return {"key": "schedule", "label": f"自定义巡检 {n_plans} 个启用", "ok": plans_ok, "note": plans_note}
         return {"key": "schedule", "label": "定时任务未开", "ok": False, "note": "配 SCHEDULE_INTERVAL_MINUTES 打开"}
     st = schedule.load_state()
     if not st or not st.get("jobs"):

@@ -7,6 +7,8 @@ import { Btn, call } from "../lib/sopui";
 import Spark from "../lib/Spark";
 import InspectionConfigForm, { type InspectionConfig } from "./InspectionConfigForm";
 import InspectionPlans from "./InspectionPlans";
+import BasicSpec from "./BasicSpec";
+import HelpTip from "../lib/HelpTip";
 
 type Check = { label: string; text: string; passed: boolean };
 type Rule = { name: string; kind: string; summary: string; checks: Check[]; points: number };
@@ -66,32 +68,29 @@ const RANK: Record<string, number> = { bad: 0, warn: 1, ok: 2, skip: 3 };
 const worst = (d: StatusDevice) => Math.min(...d.checks.map((c) => RANK[c.status] ?? 3), 3);
 const isHigh = (s: string) => s === "high" || s === "高" || s === "要紧";
 
-/** 巡检页两个子页签：巡检结果（内置的趋势 + 状态巡检）/ 巡检计划（对话制定的自定义清单 + 周期）。
- *  沿用现有导航，不另开一级菜单；`#inspection?plans` 直接打开计划页签。 */
+/** 巡检页两个页签：「自定义巡检」（用对话创建的计划，列表顶上两行是基础巡检的概况）和
+ *  「基础巡检」（系统默认的健康检查：趋势 + 状态两类固定规则巡检，由 SCHEDULE_INTERVAL_MINUTES 驱动，顶部说明区可改周期）。
+ *  默认打开自定义巡检；`#inspection?builtin` / `?basic`（老链接 `?results` 也认）打开基础巡检，`#inspection` / `?plans` 打开自定义巡检。 */
+type View = "plans" | "builtin";
 export default function Inspection() {
   const t = useT();
-  const [view, setView] = useState<"results" | "plans">(() => (location.hash.includes("plans") ? "plans" : "results"));
-  const pick = (v: "results" | "plans") => { setView(v); history.replaceState(null, "", v === "plans" ? "#inspection?plans" : "#inspection"); };
+  const fromHash = (): View => (/[?&](builtin|basic|results)/.test(location.hash) ? "builtin" : "plans");
+  const [view, setView] = useState<View>(fromHash);
+  const [seed, setSeed] = useState(0);  // 「以基础巡检为起点」：每点一次 +1，自定义巡检页签据此打开预置好的新建对话
+  const pick = (v: View) => { setView(v); history.replaceState(null, "", v === "builtin" ? "#inspection?builtin" : "#inspection"); };
   return (
-    <div className="mx-auto max-w-[1280px] space-y-4">
+    <div className="page-wrap space-y-4">
       <div className="flex gap-5 border-b border-line" role="tablist" data-testid="inspection-views">
-        {(["results", "plans"] as const).map((v) => (
-          <button key={v} role="tab" aria-selected={view === v} onClick={() => pick(v)}
-            className={cn("-mb-px border-b-2 px-1 pb-2.5 text-[15px] font-semibold transition",
+        {(["plans", "builtin"] as const).map((v) => (
+          <button key={v} role="tab" aria-selected={view === v} onClick={() => pick(v)} data-testid={`tab-${v}`}
+            className={cn("-mb-px border-b-2 px-1 pb-2.5 text-[0.9375rem] font-semibold transition",
               view === v ? "border-brand text-brand" : "border-transparent text-slate-600 hover:text-slate-900")}>
-            {t(v === "plans" ? "inspection.view.plans" : "inspection.view.results")}
+            {t(v === "plans" ? "inspection.view.plans" : "inspection.view.builtin")}
           </button>
         ))}
       </div>
-      {view === "results" && (
-        <div className="flex items-center gap-3 rounded-[3px] border border-brand/30 bg-brand/[0.05] px-4 py-2.5 text-[13px]" data-testid="plans-callout">
-          <span className="font-medium text-slate-800">{t("inspection.callout.text")}</span>
-          <button onClick={() => pick("plans")} className="ml-auto rounded-[3px] bg-brand px-3 py-1 text-xs font-medium text-white hover:opacity-90">
-            {t("inspection.callout.cta")}
-          </button>
-        </div>
-      )}
-      {view === "plans" ? <InspectionPlans /> : <InspectionResults />}
+      {view === "builtin" && <BasicSpec onStartCustom={() => { setSeed((n) => n + 1); pick("plans"); }} />}
+      {view === "plans" ? <InspectionPlans onShowBuiltin={() => pick("builtin")} seed={seed} /> : <InspectionResults />}
     </div>
   );
 }
@@ -151,8 +150,7 @@ function InspectionResults() {
   const hasDiff = !!(diff?.status || diff?.trend);
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-slate-600">{t("inspection.intro")}</p>
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <Btn tone="brand" busy={running} disabled={running} onClick={rerun}>{running ? t("inspection.running") : t("inspection.run")}</Btn>
         <a href="/api/inspection/export?format=md" download data-testid="export-md"><Btn>{t("inspection.export.md")}</Btn></a>
         <a href="/api/inspection/export?format=html" download data-testid="export-html"><Btn>{t("inspection.export.html")}</Btn></a>
@@ -178,7 +176,7 @@ function InspectionResults() {
           <div key={label as string} className="px-4 py-3">
             <div className="text-xs font-medium text-slate-600">{label}</div>
             <div className="mt-1.5 flex items-baseline gap-1.5">
-              <span className={cn("num text-[26px] leading-none font-semibold text-slate-900", tint as string)}>{v}</span>
+              <span className={cn("num text-[1.625rem] leading-none font-semibold text-slate-900", tint as string)}>{v}</span>
               <span className="text-xs text-dim">{unit}</span>
             </div>
           </div>
@@ -186,7 +184,7 @@ function InspectionResults() {
       </div>
 
       <div data-testid="status-checks"><Card>
-        <CardHead title={t("inspection.status.title")} note={t("inspection.status.note")} icon={<Icon d={PATH.spark} className="text-slate-500" />} />
+        <CardHead title={t("inspection.status.title")} right={<HelpTip text={t("inspection.status.note")} />} icon={<Icon d={PATH.spark} className="text-slate-500" />} />
         {devices.length === 0 ? <Empty title={t("inspection.status.empty")} /> : (
           <div className="divide-y divide-line">
             {devices.map((dev) => {
@@ -194,7 +192,7 @@ function InspectionResults() {
               return (
                 <div key={dev.name}>
                   <button onClick={() => setDevOpen(devOpen === dev.name ? "" : dev.name)} className="flex w-full flex-wrap items-center gap-3 px-4 py-2 text-left transition hover:bg-slate-50">
-                    <span className="num w-16 text-[13px] font-semibold text-slate-800">{dev.name}</span>
+                    <span className="num w-16 text-[0.8125rem] font-semibold text-slate-800">{dev.name}</span>
                     {dev.role && <Badge className="bg-white text-slate-600 ring-slate-300">{dev.role}</Badge>}
                     <span className="flex min-w-0 flex-1 flex-wrap gap-1.5">
                       {dev.checks.map((c) => (
@@ -289,20 +287,20 @@ function InspectionResults() {
 
       <div>
         <div className="mb-2 flex items-center gap-2">
-          <h2 className="text-[13px] font-semibold tracking-wide text-slate-800">{t("inspection.groups.title")}</h2>
+          <h2 className="text-[0.8125rem] font-semibold tracking-wide text-slate-800">{t("inspection.groups.title")}</h2>
           <span className="ml-auto text-xs text-dim">{t("inspection.groupBy")}</span>
           {(["kind", "host"] as const).map((k) => (
             <Btn key={k} small tone={groupBy === k ? "brand" : "plain"} onClick={() => { setGroupBy(k); setOpen(""); }}>{t(k === "kind" ? "inspection.groupBy.kind" : "inspection.groupBy.host")}</Btn>
           ))}
         </div>
-        {groups.length === 0 ? <Card><Empty title={t("inspection.groups.empty.title")} hint={t("inspection.groups.empty.hint")} /></Card> : (
+        {groups.length === 0 ? <Card><Empty title={t("inspection.groups.empty.title")} /></Card> : (
           <div className="space-y-2">
             {groups.map((g) => (
               <Card key={g.label} className="overflow-hidden">
                 <button onClick={() => setOpen(open === g.label ? "" : g.label)}
                   className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-slate-50">
                   <Badge className={TONE[g.label] ?? "bg-slate-100 text-slate-600 ring-slate-200"}>{TONE_KEY[g.label] ? t(TONE_KEY[g.label].label) : g.label} · {g.rows.length}</Badge>
-                  <span className="min-w-0 flex-1 truncate text-[13px] text-dim">{TONE_KEY[g.label] ? t(TONE_KEY[g.label].why) : g.why}</span>
+                  <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-dim">{TONE_KEY[g.label] ? t(TONE_KEY[g.label].why) : g.why}</span>
                   <Icon d={PATH.chevron} className={cn("h-4 w-4 text-slate-400 transition", open === g.label && "rotate-90")} />
                 </button>
                 {open === g.label && (
@@ -340,7 +338,7 @@ function InspectionResults() {
       </div>
       {(d.ignored?.length ?? 0) > 0 && (
         <div data-testid="ignored-list"><Card>
-          <CardHead title={fill(t("inspection.ignored.title"), { n: d.ignored!.length })} note={t("inspection.ignored.note")} />
+          <CardHead title={fill(t("inspection.ignored.title"), { n: d.ignored!.length })} right={<HelpTip text={t("inspection.ignored.note")} />} />
           <div className="divide-y divide-line">
             {d.ignored!.map((x) => (
               <div key={x.host + x.key} className="flex items-center gap-3 px-5 py-2.5 text-sm">
@@ -370,14 +368,10 @@ function InspectionResults() {
       </Card></div>
 
       <details data-testid="inspection-params" className="rounded-[4px] border border-line bg-card">
-        <summary className="cursor-pointer select-none bg-[#f6f7f9] px-4 py-2.5 text-[13px] font-semibold tracking-wide text-slate-800">
-          {t("inspection.params.title")} <span className="ml-2 text-xs font-normal text-dim">{t("inspection.params.note")}</span>
+        <summary className="cursor-pointer select-none bg-[#f6f7f9] px-4 py-2.5 text-[0.8125rem] font-semibold tracking-wide text-slate-800">
+          {t("inspection.params.title")} <span className="ml-1.5"><HelpTip text={t("inspection.how.body")} /></span>
         </summary>
         <div className="space-y-4 border-t border-line p-5">
-          <div data-testid="inspection-how" className="rounded-[3px] border border-line border-l-2 border-l-brand bg-slate-50 px-4 py-3 text-[13px] leading-relaxed text-slate-700">
-            <div className="mb-1 font-semibold text-slate-800">{t("inspection.how.title")}</div>
-            <p>{t("inspection.how.body")}</p>
-          </div>
           {cfg && <InspectionConfigForm cfg={cfg} onSaved={(c) => { setCfg(c); reload(); }} onRun={rerun} />}
         </div>
       </details>

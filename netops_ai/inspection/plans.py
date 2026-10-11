@@ -139,6 +139,18 @@ TEMPLATES: dict[str, dict[str, Any]] = {
                         {"name": "cpu_5m", "regex": r"five minutes: (\d+)%", "cast": "int"}],
         },
     },
+    "route_count": {
+        "title": {"zh": "路由条目数", "en": "Route entries"},
+        "what": {"zh": "统计路由表条目数；比上一次巡检少就报警（首次运行只记录基线，不判）",
+                 "en": "Counts the routing table entries; alerts when there are fewer than in the previous run (the first run only records a baseline)"},
+        "kind": "gauge", "roles": ["core", "aggregation"],
+        "check": {
+            # 只数真正的路由行（代码 + 前缀），说明行和「is variably subnetted」这类汇总行不算。管道 count 在只读白名单里。
+            "command": "show ip route | count ^[A-Z][A-Z0-9* ]+[0-9]+[.]",
+            "expect": [{"type": "metric_vs_previous", "metric": "route_count", "direction": "decrease", "tolerance_pct": 0, "severity": "critical"}],
+            "extract": [{"name": "route_count", "regex": r"=\s*(\d+)", "cast": "int"}],
+        },
+    },
     "memory": {
         "title": {"zh": "内存", "en": "Memory"},
         "what": {"zh": "处理器内存池的已用 / 空闲字节数", "en": "Processor pool used / free bytes"},
@@ -879,7 +891,9 @@ def run_plan(name: str, adapter_factory: Callable[[Any], Any] | None = None, *, 
         plan = _refresh_hosts(load_plan(name))
         if adapter_factory is None:
             from netops_ai.topology import _default_adapter_factory as adapter_factory  # noqa: N813
-        result = run_checklist(plan, adapter_factory)
+        # 有状态的指标规则要看「上一次 / 基线」：每次现从存下来的运行结果里读（持着这个计划的锁，不会跟另一次运行交错）
+        history = load_history(Path(runs_dir or RUNS_DIR), name, 500)
+        result = run_checklist(plan, adapter_factory, history=history)
         path = save_result(result, Path(runs_dir or RUNS_DIR))
         return result, path
     finally:

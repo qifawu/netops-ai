@@ -113,6 +113,7 @@ Rules for the draft:
 - devices: names from `topology_devices` only.
 - checks: prefer templates — set `template` to a template id and leave id/title/command/expect/extract empty. Write a custom check (template "") only when no template fits: one full read-only `show ...` command (no abbreviations, no placeholders), preferably from `command_catalog`, expect/extract regexes that match real Cisco IOS output. Never propose configuration, clear, reload, debug, copy or any command that changes the device: a whitelist rejects them and they never reach the device.
 - A check's `devices` = [] means every plan device; otherwise list the subset (e.g. BGP only on core).
+- "Alert when the number of routes drops compared with last time" (or similar "fewer than the previous run") → use the `route_count` template: it counts the routing table entries and compares each run with the previous one (the first run records a baseline).
 - schedule: `every_minutes` (integer) or `daily_at` "HH:MM" (server local time); set the unused one to 0 / "". If the user has not said, set both to 0 / "" and ask.
 - ready = true only when devices, checks and schedule are all decided and nothing important is still open.
 - enabled: true, unless the user asked to pause the plan (then false).
@@ -381,10 +382,14 @@ def opening(topology: dict[str, Any], draft: dict[str, Any] | None, lang: str) -
         reply = (f"Hi — let's set up a read-only inspection plan. The topology has {len(topology)} devices: " + ", ".join(parts) + "."
                  "\nPick the devices below, or just tell me what worries you most and I'll propose checks and a schedule.")
         quick = ["Neighbors and routing on the core", "Growing interface errors", "CPU and memory"]
-    d = draft if draft and draft.get("devices") else P.empty_draft()
+    d = draft if draft and (draft.get("devices") or draft.get("checks")) else P.empty_draft()  # 预置了检查项（以基础巡检为起点）的草案也留着
     d.setdefault("name", "")
     if not d["name"]:
         d["name"] = P.default_name()
+    if d.get("checks") and not d.get("devices"):
+        titles = [P.TEMPLATES[c["template"]]["title"]["zh" if zh else "en"] for c in d["checks"] if c.get("template") in P.TEMPLATES]
+        reply += (("\n已按基础巡检预置了检查项：" + "、".join(titles) + "。先选设备范围，再定周期。") if zh
+                  else ("\nPre-filled with the basic inspection checks: " + ", ".join(titles) + ". Pick the devices first, then the schedule."))
     v = P.check_draft(d)
     return {"reply": reply, "draft": d, "validation": v, "ready": False, "quick_replies": quick,
             "suggestions": merge_suggestions([], d, topology, lang), "source": "opening", "fix_rounds": 0}
@@ -398,6 +403,7 @@ _TEMPLATE_WORDS = {
     "uplink_errors": r"上联|uplink",
     "interfaces": r"接口状态|接口\s*up|接口\s*down|interface status|link down|端口",
     "cpu": r"cpu",
+    "route_count": r"路由条目|路由表|路由数|route count|routing table|route entries|number of routes",
     "memory": r"内存|memory",
 }
 

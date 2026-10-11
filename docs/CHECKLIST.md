@@ -1,10 +1,22 @@
-# Inspection plans
+# Custom inspections (inspection plans)
 
-An inspection plan is a list of read-only checks per device plus a schedule. You do not fill in a form or write YAML: you **define it in a conversation** in the dashboard, the assistant drafts the plan and proposes improvements, and after you confirm the commands, the devices and the schedule it runs on its own. The built-in trend and status inspections use fixed checks; a plan is how you add your own.
+A custom inspection is a list of read-only checks per device plus a schedule — your own, next to the system's default **basic inspection**. You do not fill in a form or write YAML: you **define it in a conversation** in the dashboard, the assistant drafts it and proposes improvements, and after you confirm the commands, the devices and the schedule it runs on its own.
+
+## Basic inspection and custom inspections
+
+The **Inspection** page has two tabs:
+
+- **Custom inspection** (opens by default; `#inspection` / `#inspection?plans`) — a line at the top says it plainly: *the basic inspection is the system's default health check; here are the checks you define yourself*, with a link to the basic inspection. The list shows the two **Basic** rows first — the trend part (reads Zabbix history for items that keep worsening, flap or spike periodically) and the status part (logs in to devices for a fixed set of read-only checks) — with their last result, next run, *Run now* and *View results*; they cannot be deleted or edited here. Below them are the custom inspections you created, each with its own schedule and results.
+- **Basic inspection** (`#inspection?basic`; the old `?builtin` / `?results` links still work) — the full results of the two fixed-rule inspections, with a collapsible **What the basic inspection checks** panel on top:
+  - the status checks, one row each — what is checked, the rule, the command and the scope — generated from `netops_ai/inspection/status.py` (`COMMANDS`), not written into the page;
+  - the three trend detectors (sustained one-way trend, periodic spike, flapping that heals itself) with their current thresholds from `inspection.yaml`;
+  - *every verdict comes from fixed rules; no model is called* (the optional model advice only groups and comments on what was found);
+  - the **schedule**: off / every 15 min / 30 min / hourly / every 6 hours / daily, written back to `SCHEDULE_INTERVAL_MINUTES` (the same setting as in Settings) and applied from the next round without a restart — each round also saves a device configuration snapshot, as before; the last and next run times; the basic inspection cannot be deleted;
+  - **Create a custom inspection from the basic one**: opens a new conversation with the basic checks pre-filled as check templates (interfaces, OSPF neighbors, BGP sessions, interface error counters); you pick the devices and the schedule, then confirm.
 
 ## Creating a plan
 
-**Inspection → Inspection plans → New plan** opens a two-pane panel: the conversation on the left, the live draft on the right.
+**Inspection → Custom inspection → New custom inspection** opens a two-pane panel: the conversation on the left, the live draft on the right.
 
 1. **The assistant opens.** It lists what it sees in the topology (devices per role) and asks what worries you most, with quick replies such as "Neighbors and routing on the core", "Growing interface errors", "CPU and memory". The opening never calls the model.
 2. **You answer in plain words**, e.g. *"core and aggregation devices; I mostly worry about OSPF neighbors going down and interface errors growing; hourly"*. Each turn the assistant returns a short reply (at most one or two questions — which faults matter, which devices are the focus, how often, how much alert noise is acceptable) and the **complete updated draft**.
@@ -26,7 +38,7 @@ Below an assistant reply there may also be up to two **hints** — lighter than 
 
 ## Adjusting an existing plan
 
-Click **Adjust** on a plan row (or **Adjust a plan** at the top and pick one from the list the assistant shows: name, devices, checks, schedule, enabled, last result). The plan is loaded as the draft and the assistant asks what to change: add or remove checks or commands, other devices, the schedule, or pausing the plan. The same validation and the same three-item confirmation apply; confirming writes the changes back to the same plan.
+Click **Adjust** on a plan row (or **Adjust a custom inspection** at the top and pick one from the list the assistant shows: name, devices, checks, schedule, enabled, last result). The plan is loaded as the draft and the assistant asks what to change: add or remove checks or commands, other devices, the schedule, or pausing the plan. The same validation and the same three-item confirmation apply; confirming writes the changes back to the same plan.
 
 ## Renaming, pausing, deleting
 
@@ -104,7 +116,9 @@ The index is written to `records/docs_kb.db` (set `DOC_SEARCH_DB` in `.env` to u
 
 | Method | Path | |
 |---|---|---|
-| POST | `/api/inspection/plans/chat` | one turn: `{session, messages, draft?, lang, mode: new\|edit, plan?}` → `{reply, draft, validation: {ok, problems, missing}, ready, suggestions, candidates, quick_replies, awaiting_confirm, confirm_card}` |
+| POST | `/api/inspection/plans/chat` | one turn: `{session, messages, draft?, lang, mode: new\|edit, plan?, selection?, seed?: basic}` → `{reply, draft, validation: {ok, problems, missing}, ready, suggestions, candidates, quick_replies, awaiting_confirm, confirm_card}` |
+| GET | `/api/inspection/basic/spec?lang=zh\|en` | what the basic inspection checks (status commands from `status.COMMANDS`, detector thresholds from `inspection.yaml`), its schedule, last and next run |
+| PUT | `/api/inspection/basic/schedule` | `{minutes}`: 0 (off), 15, 30, 60, 360 or 1440; written to `SCHEDULE_INTERVAL_MINUTES`, applies from the next round |
 | POST | `/api/inspection/plans/confirm` | `{session, draft, confirmed: {commands, devices, schedule}}`: all three true → save; otherwise back to the conversation (409 if nothing is waiting for confirmation) |
 | POST | `/api/inspection/plans/draft` | merge a suggestion's or a picked command's `patch` into a draft / re-validate (no model call) |
 | GET | `/api/inspection/plans` | list with last run and next run time |
@@ -116,6 +130,43 @@ The index is written to `records/docs_kb.db` (set `DOC_SEARCH_DB` in `.env` to u
 | POST | `/api/inspection/plans/{name}/run` | run once now (409 if it is already running) |
 | GET | `/api/inspection/plans/{name}/runs` | run history, newest first |
 | POST | `/api/inspection/plans/{name}/trend` | trend analysis by the model; without a model, the trend table and the prompt |
+
+## Dry run / 试运行
+
+Before saving, **Dry run** (in the draft pane, and suggested in the confirmation card) runs the draft's read-only commands once on the chosen devices, through the same read-only whitelist and device adapter as a real run. Nothing is stored (no run record, no schedule state) and no alert is raised. The result table shows, per device and check: the status (OK / refused / timeout / error / cancelled), the time taken, the output size (lines and bytes), the current value of every extracted metric, and for every rule whether it **would pass or fail** in a real run — stateful rules say *first run: would record a baseline* or *vs 12 last time (now 10): would fail*. Click a row for the first lines of the raw output. Devices run in parallel (up to 4), the whole dry run has a time limit (120 s), progress is shown and it can be cancelled. The result keeps its timestamp; once the devices or checks in the draft change it is marked **out of date**. API: `POST /api/inspection/plans/dry-run` `{draft, devices?}` → `{job_id}`, `GET …/dry-run/{job_id}` for progress and result, `DELETE …/dry-run/{job_id}` to cancel.
+
+保存前可以点「试运行」：用和正式运行同一套只读白名单和设备适配器，对选定的设备把草案里的命令真的跑一遍，**不存记录、不触发告警**。结果表逐设备逐检查项列出状态（成功 / 被拒 / 超时 / 出错 / 已取消）、耗时、输出行数与字节数、指标当前值，以及每条规则「若正式运行将通过 / 失败」；有状态规则会显示「首次：将记录基线」或「与上次 12 相比（现在 10）：将失败」。点开一行可看输出原文前几行。设备并发上限 4，整体限时 120 秒，可看进度、可取消；结果带时间戳，草案改过设备或检查项后标成「已过期」。确认卡里还没试运行过时会有一条轻提示（不强制）。
+
+## Stateful rules / 有状态规则
+
+Besides the text rules (`contains`, `regex`, …), a check can judge an **extracted number against history**. The previous value or baseline is read from the stored runs of the same plan, device, check and metric — the most recent run that actually collected it. A run where the device was unreachable or the command was refused never becomes the reference.
+
+| Rule | Meaning |
+|---|---|
+| `metric_vs_previous` | compare with the previous run: `direction: decrease \| increase \| change`, optional `tolerance_pct` / `tolerance_abs`, `reset_ok: true` treats a lower value as a counter reset |
+| `metric_threshold` | absolute threshold: `op: '>' \| '<' \| '>=' \| '<='`, `value` |
+| `metric_vs_baseline` | compare with the first collected value, or a fixed `baseline` you set |
+
+States: `baseline` — first run, the value is recorded and not judged; `no_baseline` — earlier runs did not collect the metric, not judged; `no_value` — not collected this time, not judged; `reset`; `pass` / `fail`. Every result records both values and where the reference came from (run id, or *fixed*). Reports list each run's outcome ("首次运行，已记录基线", "本次 11 / 对照 12，对照运行 …"), and the trend-analysis prompt includes them. The check picker has a ready-made **Route entries** template, and the assistant uses it for requests such as *alert if the number of routes is lower than last time*.
+
+检查项除了文本规则，还可以拿**提取出来的数字跟历史比**：上一次 / 基线取自同一计划、同一设备、同一检查项、同名指标、最近一次**成功采到**该指标的存档运行；设备不可达或命令被拒的那次不会成为对照。第一次运行只记录基线、不判；之前没采到该指标时不判并提示；`reset_ok: true` 把「比上次小」当作计数复位。结果里写明比较的双方数值和对照来源（run id 或固定值），报告和趋势分析提示词里都带上。选检查项的气泡里有现成的「路由条目数」模板，对话里说「路由条目比上次少就报警」助手也会用它。
+
+```yaml
+checks:
+  - id: route_count
+    command: show ip route | count ^[A-Z][A-Z0-9* ]+[0-9]+[.]     # counts route lines only
+    extract:
+      - {name: route_count, regex: '=\s*(\d+)', cast: int}
+    expect:
+      - {type: metric_vs_previous, metric: route_count, direction: decrease, tolerance_pct: 0, severity: critical}
+      - {type: metric_threshold, metric: route_count, op: '>=', value: 1, severity: warning}
+  - id: crc
+    command: show interfaces GigabitEthernet0/1 | include CRC
+    extract:
+      - {name: crc, regex: '(\d+) CRC', cast: int}
+    expect:
+      - {type: metric_vs_previous, metric: crc, direction: increase, tolerance_abs: 10, reset_ok: true, severity: warning}
+```
 
 ## Checklist format (for reference)
 

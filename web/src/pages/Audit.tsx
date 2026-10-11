@@ -23,7 +23,7 @@ type Data = {
   commands_top: Command[]; devices: Device[]; timeline: Timeline[]; denials: Denial[];
 };
 
-const TH = "px-4 py-1.5 text-left text-[11px] font-semibold tracking-wide text-slate-500 uppercase";
+const TH = "px-4 py-1.5 text-left text-[0.6875rem] font-semibold tracking-wide text-slate-500 uppercase";
 
 export default function Audit() {
   const t = useT();
@@ -41,35 +41,35 @@ export default function Audit() {
   const devRows = d.devices.filter((x) => !x.device.startsWith("<"));
   const maxCmd = Math.max(1, ...devRows.map((x) => x.commands));
   return (
-    <div className="mx-auto max-w-[1280px] space-y-5">
+    <div className="page-wrap space-y-5">
       <section className="grid grid-cols-[1.5fr_1fr_1fr_1fr] divide-x divide-line rounded-[4px] border border-line bg-card">
         <div className="px-4 py-3">
           <div className="flex items-center gap-1.5 text-xs font-medium text-slate-600"><Icon d={PATH.shield} className="h-3.5 w-3.5 text-ok" />{t("audit.summary.title")}</div>
-          <div className="mt-1.5 text-[13px] leading-snug font-semibold text-slate-800">
-            {t("audit.summary.ranPrefix")} <span className="num text-[26px] text-ok">{s.command_total.toLocaleString()}</span> {t("audit.summary.ranSuffix")}
+          <div className="mt-1.5 text-[0.8125rem] leading-snug font-semibold text-slate-800">
+            {t("audit.summary.ranPrefix")} <span className="num text-[1.625rem] text-ok">{s.command_total.toLocaleString()}</span> {t("audit.summary.ranSuffix")}
           </div>
-          <div className="mt-1.5 text-[11.5px] text-dim">
+          <div className="mt-1.5 text-[0.71875rem] text-dim">
             {s.non_show_commands === 0 ? t("audit.summary.allShow") : `${t("audit.summary.someNonShow")} ${s.non_show_commands} ${t("audit.summary.someNonShowSuffix")}`}
           </div>
         </div>
         {[
           [t("audit.kpi.denied"), s.denied_commands, t("unit.times"), s.denied_groups ? `${t("audit.kpi.denied.groupedPrefix")} ${s.denied_groups} ${t("audit.kpi.denied.groupedSuffix")}` : t("audit.kpi.denied.none"), s.denied_commands ? "text-warn" : ""],
-          [t("audit.kpi.devices"), s.devices, t("unit.devices"), t("audit.kpi.devices.sub"), ""],
-          [t("audit.kpi.chat"), s.chat_traces, t("unit.times"), t("audit.kpi.chat.sub"), ""],
+          [t("audit.kpi.devices"), s.devices, t("unit.devices"), "", ""],
+          [t("audit.kpi.chat"), s.chat_traces, t("unit.times"), "", ""],
         ].map(([label, v, unit, sub, tint]) => (
           <div key={label as string} className="px-4 py-3">
             <div className="text-xs font-medium text-slate-600">{label}</div>
             <div className="mt-1.5 flex items-baseline gap-1.5">
-              <span className={cn("num text-[26px] leading-none font-semibold text-slate-900", tint as string)}>{v}</span>
+              <span className={cn("num text-[1.625rem] leading-none font-semibold text-slate-900", tint as string)}>{v}</span>
               <span className="text-xs text-dim">{unit}</span>
             </div>
-            <div className="mt-1.5 text-[11.5px] text-dim">{sub}</div>
+            {sub && <div className="mt-1.5 text-[0.71875rem] text-dim">{sub}</div>}
           </div>
         ))}
       </section>
 
       <section>
-        <SectionTitle title={t("audit.commandsTable.title")} note={t("audit.commandsTable.note")} />
+        <SectionTitle title={t("audit.commandsTable.title")} />
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -79,8 +79,8 @@ export default function Audit() {
               <tbody className="divide-y divide-line">
                 {(commandsExpanded ? d.commands_top : topCommands).map((x) => (
                   <tr key={x.command} className="transition even:bg-[#fafbfc] hover:bg-brand/[0.04]">
-                    <td className="px-4 py-1.5"><code className="font-mono text-[12.5px]">{x.command}</code></td>
-                    <td className="num px-4 py-1.5 text-[12.5px]">{x.count}</td>
+                    <td className="px-4 py-1.5"><code className="font-mono text-[0.78125rem]">{x.command}</code></td>
+                    <td className="num px-4 py-1.5 text-[0.78125rem]">{x.count}</td>
                     <td className="px-4 py-1.5"><Badge className={x.non_show ? "bg-amber-50 text-amber-700 ring-amber-200" : "bg-white text-slate-600 ring-slate-300"}>{x.non_show ? t("audit.commandsTable.nonShow") : t("audit.commandsTable.readonly")}</Badge></td>
                   </tr>
                 ))}
@@ -99,7 +99,7 @@ export default function Audit() {
 
       <div className="grid grid-cols-2 items-start gap-4">
         <section>
-          <SectionTitle title={t("audit.byDevice.title")} note={t("audit.byDevice.note")} />
+          <SectionTitle title={t("audit.byDevice.title")} />
           <Card className="overflow-hidden">
             <table className="w-full text-sm">
               <thead className="border-b border-line bg-[#f6f7f9]">
@@ -108,7 +108,7 @@ export default function Audit() {
               <tbody className="divide-y divide-line">
                 {devRows.map((x) => (
                   <tr key={x.device}>
-                    <td className="num px-4 py-1.5 text-[12.5px] font-medium">{x.device === UNSPECIFIED_DEVICE ? t("audit.byDevice.unspecified") : x.device}</td>
+                    <td className="num px-4 py-1.5 text-[0.78125rem] font-medium">{x.device === UNSPECIFIED_DEVICE ? t("audit.byDevice.unspecified") : x.device}</td>
                     <td className="px-4 py-1.5">
                       <div className="flex items-center gap-2">
                         <div className="h-1.5 flex-1 bg-slate-100"><div className="h-1.5 bg-brand/70" style={{ width: `${(x.commands / maxCmd) * 100}%` }} /></div>
@@ -125,7 +125,7 @@ export default function Audit() {
         </section>
 
         <section>
-          <SectionTitle title={t("audit.denials.title")} note={t("audit.denials.note")} />
+          <SectionTitle title={t("audit.denials.title")} />
           {d.denials.length === 0 ? (
             <div className="rounded-[4px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">{t("audit.denials.zero")}</div>
           ) : (
@@ -137,7 +137,7 @@ export default function Audit() {
                     <span>{x.device_count} {t("audit.denials.devicesAndAlerts")} {x.alert_count} {t("audit.denials.alertsSuffix")}</span>
                     <span className="num ml-auto">{ts(x.clock)}</span>
                   </div>
-                  <code className="block rounded-[2px] border border-line bg-slate-50 px-2 py-1 font-mono text-[12.5px] break-words">{x.command}</code>
+                  <code className="block rounded-[2px] border border-line bg-slate-50 px-2 py-1 font-mono text-[0.78125rem] break-words">{x.command}</code>
                   <div className="text-xs leading-relaxed text-dim"><Inline text={x.reason} /></div>
                 </div>
               ))}
@@ -147,9 +147,9 @@ export default function Audit() {
       </div>
 
       <section>
-        <SectionTitle title={t("audit.timeline.title")} note={t("audit.timeline.note")}
+        <SectionTitle title={t("audit.timeline.title")}
           right={
-            <select value={device} onChange={(e) => setDevice(e.target.value)} className="rounded-[3px] border border-[#c3cad2] bg-card px-2 py-1 text-[13px]">
+            <select value={device} onChange={(e) => setDevice(e.target.value)} className="rounded-[3px] border border-[#c3cad2] bg-card px-2 py-1 text-[0.8125rem]">
               <option value="">{t("audit.timeline.allDevices")}</option>
               {devices.map((x) => <option key={x} value={x}>{x === UNSPECIFIED_DEVICE ? t("audit.byDevice.unspecified") : x}</option>)}
             </select>
@@ -160,7 +160,7 @@ export default function Audit() {
               <div key={`${x.clock}-${x.command}-${i}`} className="grid grid-cols-[104px_72px_minmax(0,1fr)_auto] items-center gap-3 px-4 py-1.5 text-sm even:bg-[#fafbfc]">
                 <span className="num text-xs text-dim">{x.clock ? ts(x.clock) : t("audit.timeline.unknownTime")}</span>
                 <span className="num truncate text-xs font-medium text-slate-800">{x.device}</span>
-                <code className="min-w-0 truncate font-mono text-[12.5px]">{x.command}</code>
+                <code className="min-w-0 truncate font-mono text-[0.78125rem]">{x.command}</code>
                 <Badge className="bg-white text-slate-600 ring-slate-300">{x.source_type === "chat" ? t("audit.timeline.chat") : t("audit.timeline.alert")}</Badge>
               </div>
             ))}

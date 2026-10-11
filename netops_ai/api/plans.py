@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any, Literal
 
 from fastapi import APIRouter
@@ -35,6 +36,8 @@ class PlanChatRequest(BaseModel):
     plan: str = Field(default="", max_length=64)
     #: 用户在选择气泡里提交的选择：{widget_id, type: device_picker|schedule_picker|check_picker, value}。走确定性路径，不调模型
     selection: dict[str, Any] | None = None
+    #: 新建时的起点：basic = 以基础巡检为起点（预置基础巡检那几项检查，设备让用户选）
+    seed: Literal["", "basic"] = ""
 
 
 class PlanWidgetRequest(BaseModel):
@@ -115,6 +118,10 @@ def api_plan_chat(body: PlanChatRequest) -> JSONResponse:
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"message": f"拓扑读不到：{type(exc).__name__}: {exc}"}, status_code=503)
     session = body.session or new_session_id()
+    if body.seed == "basic" and not body.messages and not body.draft:
+        from netops_ai.inspection.basic_spec import seed_draft
+
+        body.draft = seed_draft(_topology(), body.lang)
     out = _conversation().chat(session, [m.model_dump() for m in body.messages], body.draft, body.lang, mode=body.mode, plan=body.plan,
                                selection=body.selection)
     return JSONResponse(out)
@@ -160,6 +167,88 @@ def api_plan_draft(body: PlanDraftRequest) -> JSONResponse:
     return JSONResponse({"draft": clean, "validation": v, "ready": v["ok"],
                          "suggestions": merge_suggestions([], clean, topo, body.lang),
                          "live_suggestions": live_suggestions(body.suggestions, clean, topo, body.lang)})
+
+
+class DryRunRequest(BaseModel):
+    draft: dict[str, Any]
+    #: 只跑这几台（默认草案里全部）
+    devices: list[str] | None = Field(default=None, max_length=200)
+
+
+#: 试运行任务（进程内，最多留最近 20 个）：job_id → {state, done, total, cancel, result, created}
+_DRY_JOBS: dict[str, dict[str, Any]] = {}
+_DRY_LOCK = threading.Lock()
+MAX_DRY_JOBS = 20
+
+
+@router.post("/dry-run")
+def api_plan_dry_run(body: DryRunRequest) -> JSONResponse:
+    """试运行：对草案里选定的设备真的跑一遍只读命令（同一个白名单和设备适配器），不写历史、不触发告警。
+    后台跑，返回 job_id；用 GET 轮询进度和结果，DELETE 取消。"""
+    import uuid
+
+    from netops_ai.inspection import dry_run as DR
+
+    draft = body.draft or {}
+    if not draft.get("devices") or not draft.get("checks"):
+        return JSONResponse({"message": "the draft needs devices and checks before a dry run"}, status_code=400)
+    unknown = [n for n in body.devices or [] if n not in {d.get("name") for d in draft["devices"]}]
+    if unknown:
+        return JSONResponse({"message": f"not in the draft: {', '.join(unknown)}"}, status_code=400)
+    history: list[dict[str, Any]] = []
+    name = draft.get("name") or ""
+    if name and P.NAME_RX.fullmatch(name):
+        try:
+            history = P.history(name, 500)  # 指标规则对照这个计划已经存下来的运行（新计划就是空的 → 首次/基线）
+        except P.PlanError:
+            history = []
+    job_id = uuid.uuid4().hex[:12]
+    cancel = threading.Event()
+    job: dict[str, Any] = {"state": "running", "done": 0, "total": 0, "cancel": cancel, "result": None, "created": time.time()}
+    with _DRY_LOCK:
+        _DRY_JOBS[job_id] = job
+        for old in sorted(_DRY_JOBS, key=lambda k: _DRY_JOBS[k]["created"])[:-MAX_DRY_JOBS]:
+            _DRY_JOBS.pop(old, None)
+
+    def progress(done: int, total: int) -> None:
+        job.update(done=done, total=total)
+
+    def work() -> None:
+        from netops_ai.topology import _default_adapter_factory
+
+        try:
+            job["result"] = DR.dry_run(draft, _default_adapter_factory, devices=body.devices, history=history, cancel=cancel, progress=progress)
+            job["state"] = "cancelled" if job["result"].get("cancelled") else "done"
+        except Exception as exc:  # noqa: BLE001
+            job.update(state="error", error=f"{type(exc).__name__}: {exc}")
+
+    targets = [d for d in draft["devices"] if body.devices is None or d.get("name") in body.devices]
+    job["total"] = sum(1 for d in targets for c in draft["checks"] if c.get("devices") is None or d["name"] in c["devices"])
+    threading.Thread(target=work, name=f"netops-dry-run-{job_id}", daemon=True).start()
+    return JSONResponse({"job_id": job_id, "total": job["total"], "draft_key": DR.draft_key(draft)})
+
+
+def _dry_view(job_id: str) -> dict[str, Any] | None:
+    job = _DRY_JOBS.get(job_id)
+    if job is None:
+        return None
+    return {"job_id": job_id, "state": job["state"], "done": job["done"], "total": job["total"], "result": job["result"], "error": job.get("error")}
+
+
+@router.get("/dry-run/{job_id}")
+def api_plan_dry_run_status(job_id: str) -> JSONResponse:
+    view = _dry_view(job_id)
+    return JSONResponse(view) if view else JSONResponse({"message": "no such dry run"}, status_code=404)
+
+
+@router.delete("/dry-run/{job_id}")
+def api_plan_dry_run_cancel(job_id: str) -> JSONResponse:
+    """取消：已经发出的那条命令跑完为止，后面的不再发。"""
+    job = _DRY_JOBS.get(job_id)
+    if job is None:
+        return JSONResponse({"message": "no such dry run"}, status_code=404)
+    job["cancel"].set()
+    return JSONResponse(_dry_view(job_id))
 
 
 @router.get("")

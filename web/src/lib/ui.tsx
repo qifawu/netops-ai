@@ -12,7 +12,7 @@ export function CardHead({ title, note, right, icon }: { title: string; note?: s
   return (
     <div className="flex min-h-[40px] items-center gap-2 border-b border-line bg-[#f6f7f9] px-4 py-2">
       {icon && <span className="flex shrink-0 text-slate-500 [&>svg]:!text-slate-500">{icon}</span>}
-      <span className="text-[13px] font-semibold tracking-wide text-slate-800">{title}</span>
+      <span className="text-[0.8125rem] font-semibold tracking-wide text-slate-800">{title}</span>
       {note && <span className="text-xs text-dim">{note}</span>}
       {right && <span className="ml-auto">{right}</span>}
     </div>
@@ -21,7 +21,7 @@ export function CardHead({ title, note, right, icon }: { title: string; note?: s
 
 export function Badge({ children, className, title }: { children: ReactNode; className?: string; title?: string }) {
   return (
-    <span title={title} className={cn("inline-flex shrink-0 items-center gap-1 rounded-[2px] px-1.5 py-px text-[11px] leading-[16px] font-medium whitespace-nowrap ring-1 ring-inset", className)}>
+    <span title={title} className={cn("inline-flex shrink-0 items-center gap-1 rounded-[2px] px-1.5 py-px text-[0.6875rem] leading-[16px] font-medium whitespace-nowrap ring-1 ring-inset", className)}>
       {children}
     </span>
   );
@@ -31,7 +31,7 @@ export function SectionTitle({ title, note, right }: { title: string; note?: str
   return (
     <div className="mb-3 flex items-end gap-3">
       <div>
-        <h2 className="text-[13px] font-semibold tracking-wide text-slate-800">{title}</h2>
+        <h2 className="text-[0.8125rem] font-semibold tracking-wide text-slate-800">{title}</h2>
         {note && <p className="mt-0.5 text-xs text-dim">{note}</p>}
       </div>
       {right && <div className="ml-auto">{right}</div>}

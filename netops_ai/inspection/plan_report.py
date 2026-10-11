@@ -13,9 +13,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from netops_ai.inspection.checklist import METRIC_EXPECT_TYPES, _describe_metric_rule
 from netops_ai.inspection.export import Block, blocks_to_html, blocks_to_markdown
 
 STATUS_CN = {"pass": "通过", "fail": "未通过", "error": "出错", "denied": "被拒绝"}
+#: 指标规则这一次的状态（不判的几种要写清楚原因）
+RULE_STATE_CN = {"pass": "通过", "fail": "未通过", "baseline": "首次运行，已记录基线（不判）",
+                 "no_baseline": "之前没有采到这个指标，本次不判", "no_value": "本次没有采到这个指标，不判", "reset": "比上次小，按计数复位处理"}
 EVIDENCE_CHARS = 2000
 
 
@@ -37,7 +41,20 @@ def _sched(s: dict[str, Any]) -> str:
 
 
 def _fmt_rule(e: dict[str, Any]) -> str:
+    if e.get("type") in METRIC_EXPECT_TYPES:
+        # 运行结果里的规则已经带着描述（value）；计划定义里的规则没有，现拼一句
+        desc = e.get("value") if "state" in e else _describe_metric_rule(e)
+        return f"{desc}（{e.get('severity', 'warning')}）"
     return f"{e.get('type')} {e.get('value')}（{e.get('severity', 'warning')}）"
+
+
+def _rule_outcome(e: dict[str, Any]) -> str:
+    """一条指标规则这次的结果，写出比较的双方和来源运行。"""
+    state = RULE_STATE_CN.get(e.get("state"), e.get("state") or "")
+    if e.get("reference") is not None:
+        src = f"，对照运行 {e['reference_run_id']}" if e.get("reference_run_id") else "（固定值）"
+        return f"{e.get('value')}：{state}，本次 {e.get('current')} / 对照 {e.get('reference')}{src}"
+    return f"{e.get('value')}：{state}" + (f"，本次 {e.get('current')}" if e.get("current") is not None else "")
 
 
 def build_blocks(plan: dict[str, Any], runs: list[dict[str, Any]], trend: dict[str, Any] | None = None,
@@ -95,6 +112,9 @@ def build_blocks(plan: dict[str, Any], runs: list[dict[str, Any]], trend: dict[s
             continue
         for c in d.get("checks") or []:
             metrics = "，".join(f"{k}={v}" for k, v in (c.get("metrics") or {}).items()) or (c.get("detail") or "—")
+            rules = [_rule_outcome(e) for e in c.get("evaluations") or [] if e.get("type") in METRIC_EXPECT_TYPES]
+            if rules:
+                metrics += "；" + "；".join(rules)
             rrows.append([d.get("name"), c.get("id"), STATUS_CN.get(c.get("status"), c.get("status")), metrics])
             evidence.append((d.get("name"), c))
     blocks.append(("table", ["设备", "检查项", "结果", "指标 / 说明"], rrows))
@@ -126,6 +146,24 @@ def build_blocks(plan: dict[str, Any], runs: list[dict[str, Any]], trend: dict[s
             mrows.append([dev, cid, m, " → ".join("-" if v is None else str(v) for v in vals), nums[-1] if nums else "-", change])
         blocks.append(("table", ["设备", "检查项", "指标", f"数值（最近 {len(runs)} 次，旧→新）", "最新", "变化"], mrows))
 
+    # 指标规则：每一次的结果（首次运行建基线、没基线、复位这些「不判」的情况也写清楚）
+    rule_rows: dict[tuple[str, str, str], list[str]] = {}
+    for i, r in enumerate(runs):
+        for d in r.get("devices") or []:
+            for c in d.get("checks") or []:
+                for e in c.get("evaluations") or []:
+                    if e.get("type") not in METRIC_EXPECT_TYPES:
+                        continue
+                    key = (d.get("name"), c.get("id"), e.get("value") or e.get("type"))
+                    cell = RULE_STATE_CN.get(e.get("state"), e.get("state") or "")
+                    if e.get("reference") is not None:
+                        cell += f"（{e.get('reference')}→{e.get('current')}）"
+                    rule_rows.setdefault(key, ["-"] * len(runs))[i] = cell
+    if rule_rows:
+        blocks.append(("h3", "指标规则每次的结果"))
+        blocks.append(("table", ["设备", "检查项", "规则", f"结果（最近 {len(runs)} 次，旧→新）"],
+                       [[dev, cid, rule, " → ".join(cells)] for (dev, cid, rule), cells in rule_rows.items()]))
+
     # ---- 5. 失败项清单
     blocks.append(("h2", "5. 失败项清单"))
     frows = []
@@ -136,7 +174,8 @@ def build_blocks(plan: dict[str, Any], runs: list[dict[str, Any]], trend: dict[s
             for c in d.get("checks") or []:
                 if c.get("status") == "pass":
                     continue
-                why = "；".join(_fmt_rule(e) for e in c.get("evaluations") or [] if not e.get("passed")) or (c.get("detail") or "")
+                why = "；".join(_rule_outcome(e) if e.get("type") in METRIC_EXPECT_TYPES else _fmt_rule(e)
+                               for e in c.get("evaluations") or [] if e.get("passed") is False) or (c.get("detail") or "")
                 frows.append([_t(r.get("started_at")), d.get("name"), c.get("id"), STATUS_CN.get(c.get("status"), c.get("status")), why])
     if frows:
         blocks.append(("table", ["时间", "设备", "检查项", "结果", "没通过的规则 / 原因"], frows))

@@ -5,6 +5,7 @@ import { AiInline, AiText } from "../lib/aitext";
 import { call } from "../lib/sopui";
 import { fill, useT, type DictKey } from "../lib/i18n";
 import { maskText, useMask } from "../lib/mask";
+import HelpTip from "../lib/HelpTip";
 
 /** 系统设置页：把散落在 `.env` 里的连接配置 + 运行参数搬到网页上，可看可改。
  *
@@ -56,13 +57,13 @@ const CONNECTION_CARDS: { key: string; titleKey: DictKey; icon: string; testTarg
   { key: "kb", titleKey: "settings.card.kb", icon: PATH.list },
 ];
 
-const RUNTIME_GROUPS: { key: string; titleKey: DictKey; noteKey?: DictKey }[] = [
-  { key: "budget", titleKey: "settings.runtime.budget.title", noteKey: "settings.runtime.budget.note" },
-  { key: "loop", titleKey: "settings.runtime.loop.title", noteKey: "settings.runtime.loop.note" },
-  { key: "chat", titleKey: "settings.runtime.chat.title", noteKey: "settings.runtime.chat.note" },
-  { key: "topology", titleKey: "settings.runtime.topology.title", noteKey: "settings.runtime.topology.note" },
-  { key: "sop", titleKey: "settings.runtime.sop.title", noteKey: "settings.runtime.sop.note" },
-  { key: "schedule", titleKey: "settings.runtime.schedule.title", noteKey: "settings.runtime.schedule.note" },
+const RUNTIME_GROUPS: { key: string; titleKey: DictKey }[] = [
+  { key: "budget", titleKey: "settings.runtime.budget.title" },
+  { key: "loop", titleKey: "settings.runtime.loop.title" },
+  { key: "chat", titleKey: "settings.runtime.chat.title" },
+  { key: "topology", titleKey: "settings.runtime.topology.title" },
+  { key: "sop", titleKey: "settings.runtime.sop.title" },
+  { key: "schedule", titleKey: "settings.runtime.schedule.title" },
 ];
 
 const SOURCE_LABEL: Record<SourceKind, { textKey: DictKey; tone: string }> = {
@@ -132,8 +133,8 @@ export default function Settings() {
   if (!data) return <Loading />;
 
   return (
-    <div className="mx-auto max-w-[1280px] space-y-5 pb-20">
-      <div className="rounded-[3px] border border-amber-200 border-l-2 border-l-amber-500 bg-amber-50 px-4 py-2.5 text-[13px] text-amber-900">
+    <div className="page-wrap space-y-5 pb-20">
+      <div className="rounded-[3px] border border-amber-200 border-l-2 border-l-amber-500 bg-amber-50 px-4 py-2.5 text-[0.8125rem] text-amber-900">
         <b>{t("settings.banner")}</b>{t("settings.bannerSep")}{t("settings.bannerSuffix")}
       </div>
 
@@ -144,7 +145,7 @@ export default function Settings() {
       )}
 
       <section>
-        <SectionTitle title={t("settings.connection.title")} note={t("settings.connection.note")} />
+        <SectionTitle title={t("settings.connection.title")} />
         <div className="grid grid-cols-2 gap-4">
           {CONNECTION_CARDS.map((c) => (
             <ConnCard key={c.key} title={t(c.titleKey)} icon={c.icon} items={byGroupThenSub.connection[c.key] || []}
@@ -157,14 +158,14 @@ export default function Settings() {
       </section>
 
       <section>
-        <SectionTitle title={t("settings.runtime.title")} note={t("settings.runtime.note")} />
+        <SectionTitle title={t("settings.runtime.title")} />
         <div className="grid grid-cols-2 gap-4">
           {RUNTIME_GROUPS.map((g) => {
             const items = byGroupThenSub.runtime[g.key] || [];
             if (items.length === 0) return null;
             return (
               <Card key={g.key} className="overflow-hidden">
-                <CardHead title={t(g.titleKey)} note={g.noteKey ? t(g.noteKey) : undefined} />
+                <CardHead title={t(g.titleKey)} />
                 <div className="divide-y divide-line">
                   {items.map((x) => <RuntimeRow key={x.key} item={x} dirty={dirty} onChange={setField} />)}
                 </div>
@@ -175,12 +176,12 @@ export default function Settings() {
       </section>
 
       <div className="fixed right-0 bottom-0 left-52 z-10 border-t border-line bg-white px-6 py-2.5">
-        <div className="mx-auto flex max-w-[1280px] items-center gap-3">
+        <div className="page-wrap flex items-center gap-3">
           <span className="text-xs text-dim">
             {Object.keys(dirty).length === 0 ? t("settings.noUnsaved") : fill(t("settings.unsavedTemplate"), { n: Object.keys(dirty).length })}
           </span>
           <button onClick={save} disabled={saving || Object.keys(dirty).length === 0}
-            className="ml-auto rounded-[3px] bg-brand px-4 py-1.5 text-[13px] font-medium text-white transition hover:bg-[#0b4a63] disabled:cursor-not-allowed disabled:opacity-40">
+            className="ml-auto rounded-[3px] bg-brand px-4 py-1.5 text-[0.8125rem] font-medium text-white transition hover:bg-[#0b4a63] disabled:cursor-not-allowed disabled:opacity-40">
             {saving ? t("settings.saving") : t("settings.save")}
           </button>
         </div>
@@ -208,7 +209,7 @@ function ConnCard({ title, icon, items, dirty, onChange, testTarget, testResult,
     <Card className="overflow-hidden">
       <CardHead title={title} icon={<Icon d={icon} className="text-slate-500" />}
         note={feishu ? fill(t("settings.configuredRatioTemplate"), { done: configuredCount, total: items.length }) : undefined}
-        right={onTest && (
+        right={feishu ? <HelpTip text={t("settings.feishuNoTest")} /> : onTest && (
           <button onClick={onTest} disabled={testResult?.busy}
             className="rounded-[3px] border border-[#c3cad2] bg-white px-2 py-[3px] text-xs font-medium text-slate-700 transition hover:border-brand hover:text-brand disabled:opacity-50">
             {testResult?.busy ? t("settings.testing") : t("settings.testConnection")}
@@ -217,11 +218,6 @@ function ConnCard({ title, icon, items, dirty, onChange, testTarget, testResult,
       {testTarget && testResult && testResult.ok !== undefined && (
         <div className={cn("px-5 py-2 text-xs", testResult.ok ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700")}>
           {testResult.ok ? "✓" : "✗"} {testResult.message}（{testResult.elapsed_ms} ms）
-        </div>
-      )}
-      {feishu && (
-        <div className="px-5 pt-3 text-xs text-dim">
-          {t("settings.feishuNoTest")}
         </div>
       )}
       {llmRoute && llmRoute.configured && (
@@ -264,7 +260,7 @@ function FieldRow({ item, dirty, onChange }: { item: SettingItem; dirty: Record<
     <div className="px-4 py-2.5">
       <div className="flex items-center gap-2">
         <span className="text-sm font-medium text-slate-700"><AiText text={item.label} lowPriority /></span>
-        <code className="font-mono text-[11px] text-dim">{item.key}</code>
+        <code className="font-mono text-[0.6875rem] text-dim">{item.key}</code>
         {item.sensitive && !item.configured && <Badge className="bg-slate-50 text-slate-400 ring-slate-200">{t("settings.field.notConfigured")}</Badge>}
         {touched && <Badge className="bg-brand/10 text-brand ring-brand/20">{t("settings.field.pendingSave")}</Badge>}
       </div>
@@ -294,7 +290,7 @@ function RuntimeRow({ item, dirty, onChange }: { item: SettingItem; dirty: Recor
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium text-slate-700"><AiText text={item.label} lowPriority /></span>
-          <code className="font-mono text-[11px] text-dim">{item.key}</code>
+          <code className="font-mono text-[0.6875rem] text-dim">{item.key}</code>
           <SourceBadge source={item.source} />
           {touched && <Badge className="bg-brand/10 text-brand ring-brand/20">{t("settings.field.pendingSave")}</Badge>}
         </div>
