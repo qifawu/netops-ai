@@ -61,7 +61,7 @@ export const dict = {
 
   "nav.group.home": { zh: "首页", en: "Home" },
   "nav.group.ops": { zh: "智能运维", en: "AI Ops" },
-  "nav.group.assets": { zh: "资产", en: "Assets" },
+  "nav.group.assets": { zh: "资产与知识", en: "Assets & Knowledge" },
   "nav.group.admin": { zh: "管理", en: "Admin" },
 
   "nav.overview": { zh: "系统总览", en: "Overview" },
@@ -307,6 +307,8 @@ export const dict = {
   "inspection.params.note": { zh: "趋势巡检的阈值、扫描范围、忽略清单；默认折叠。", en: "Trend thresholds, scan scope and ignore list; collapsed by default." },
   "inspection.view.results": { zh: "巡检结果", en: "Results" },
   "inspection.view.plans": { zh: "巡检计划", en: "Inspection plans" },
+  "inspection.callout.text": { zh: "想让系统按周期自动巡检？用对话创建巡检计划：选设备、选检查项、定周期，确认后自动运行。", en: "Want inspections to run on a schedule? Create an inspection plan by conversation: pick devices, checks and a schedule, confirm, and it runs on its own." },
+  "inspection.callout.cta": { zh: "新建 / 管理巡检计划", en: "New / manage inspection plans" },
   "plans.intro": { zh: "巡检计划 = 一组只读检查 + 运行周期。通过对话制定：说清楚关心什么、看哪些设备、多久查一次，助手给出草案和建议，确认后按周期自动运行。", en: "An inspection plan is a set of read-only checks plus a schedule. Define it in a conversation: say what you care about, which devices and how often; the assistant drafts the plan and suggests improvements, and once confirmed it runs on schedule." },
   "plans.new": { zh: "新建计划", en: "New plan" },
   "plans.list.title": { zh: "已有计划", en: "Plans" },

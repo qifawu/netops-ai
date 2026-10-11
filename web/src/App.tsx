@@ -57,11 +57,11 @@ const NAV: { groupKey: DictKey; items: Item[] }[] = [
   { groupKey: "nav.group.home", items: [{ key: "overview", labelKey: "nav.overview", descKey: "nav.overview.desc", page: Overview }] },
   { groupKey: "nav.group.ops", items: [
     { key: "incidents", labelKey: "nav.incidents", descKey: "nav.incidents.desc", page: Incidents },
-    { key: "knowledge", labelKey: "nav.knowledge", descKey: "nav.knowledge.desc", page: Knowledge },
     { key: "inspection", labelKey: "nav.inspection", descKey: "nav.inspection.desc", page: Inspection },
   ]},
   { groupKey: "nav.group.assets", items: [
     { key: "topology", labelKey: "nav.topology", descKey: "nav.topology.desc", page: Topology },
+    { key: "knowledge", labelKey: "nav.knowledge", descKey: "nav.knowledge.desc", page: Knowledge },
   ] },
   { groupKey: "nav.group.admin", items: [
     { key: "audit", labelKey: "nav.audit", descKey: "nav.audit.desc", page: Audit },

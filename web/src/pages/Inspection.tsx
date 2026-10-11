@@ -77,12 +77,20 @@ export default function Inspection() {
       <div className="flex gap-5 border-b border-line" role="tablist" data-testid="inspection-views">
         {(["results", "plans"] as const).map((v) => (
           <button key={v} role="tab" aria-selected={view === v} onClick={() => pick(v)}
-            className={cn("-mb-px border-b-2 px-0.5 pb-2 text-[13px] font-medium transition",
+            className={cn("-mb-px border-b-2 px-1 pb-2.5 text-[15px] font-semibold transition",
               view === v ? "border-brand text-brand" : "border-transparent text-slate-600 hover:text-slate-900")}>
             {t(v === "plans" ? "inspection.view.plans" : "inspection.view.results")}
           </button>
         ))}
       </div>
+      {view === "results" && (
+        <div className="flex items-center gap-3 rounded-[3px] border border-brand/30 bg-brand/[0.05] px-4 py-2.5 text-[13px]" data-testid="plans-callout">
+          <span className="font-medium text-slate-800">{t("inspection.callout.text")}</span>
+          <button onClick={() => pick("plans")} className="ml-auto rounded-[3px] bg-brand px-3 py-1 text-xs font-medium text-white hover:opacity-90">
+            {t("inspection.callout.cta")}
+          </button>
+        </div>
+      )}
       {view === "plans" ? <InspectionPlans /> : <InspectionResults />}
     </div>
   );
