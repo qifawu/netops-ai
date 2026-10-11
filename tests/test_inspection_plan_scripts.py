@@ -43,6 +43,14 @@ def _req(**kw):
 
 
 class TestScriptFlow(_Base):
+    def setUp(self):
+        super().setUp()
+        from netops_ai.inspection import plan_chat as PC
+
+        self._old = PC.SCRIPT_AUTHORING
+        PC.SCRIPT_AUTHORING = True  # 总开关默认关；这里验证打开后的整条链路
+        self.addCleanup(setattr, PC, "SCRIPT_AUTHORING", self._old)
+
     def _conv(self, outputs, docs=None, sources=(DIFF_SCRIPT,), sample=SAMPLE):
         from netops_ai.graph.plan_graph import PlanConversation
 
@@ -136,3 +144,22 @@ class TestScriptFlow(_Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSwitchOff(_Base):
+    test_图的节点和边 = None
+    test_降级_模型不可用 = None
+
+    def test_开关关闭_提示词没有脚本规则_模型给了script_requests也不进脚本流程(self):
+        from netops_ai.graph.plan_graph import PlanConversation
+        from netops_ai.inspection import plan_chat as PC
+
+        self.assertFalse(PC.SCRIPT_AUTHORING)
+        msgs = PC.build_messages([{"role": "user", "content": "x"}], None, self.topo, "zh")
+        self.assertNotIn("script_requests", msgs[0]["content"])
+        llm = ScriptLLM([_out(script_requests=[_req()], checks=[], devices=["V1"],
+                              schedule={"every_minutes": 60, "daily_at": ""})], [DIFF_SCRIPT])
+        conv = PlanConversation(llm_factory=lambda: llm, topology_loader=lambda: self.topo, docs_db=lambda: None,
+                                sample_runner=lambda c, h, n: self.fail("must not sample"))
+        r = conv.chat("s1", [{"role": "user", "content": "x"}], None, "zh")
+        self.assertFalse(any(w.get("type") == "script_review" for w in [r.get("widget") or {}]))

@@ -113,6 +113,10 @@ def plan_json_schema() -> dict:
     }
 
 
+#: 助手自己写判定脚本的能力总开关。关掉时：提示词里不提 script_requests、图里忽略模型给出的 script_requests，
+#: 需求模板和固定规则表达不了的就如实说做不到。代码和沙箱保留，打开此开关即恢复。
+SCRIPT_AUTHORING = False
+
 SYSTEM_PROMPT = """You help a network operator define a scheduled, READ-ONLY inspection plan through conversation.
 
 Language: write `reply`, `description`, suggestion `text`/`reason` and `quick_replies` in {language}. Plan names, check ids and template ids are English identifiers.
@@ -243,7 +247,10 @@ def build_messages(messages: list[dict[str, str]], draft: dict[str, Any] | None,
     if candidates:
         context["command_candidates"] = [{"command": c["command"], "purpose": c.get("purpose", ""), "usable": c.get("allowed", False)}
                                          for c in candidates]
-    system = SYSTEM_PROMPT.replace("{language}", "English" if lang == "en" else "Simplified Chinese").replace(
+    prompt = SYSTEM_PROMPT
+    if not SCRIPT_AUTHORING:  # 关闭时整条脚本规则不进提示词，模型也就不会承诺「我来写脚本」
+        prompt = chr(10).join(ln for ln in prompt.split(chr(10)) if "script_requests" not in ln)
+    system = prompt.replace("{language}", "English" if lang == "en" else "Simplified Chinese").replace(
         "{context}", json.dumps(context, ensure_ascii=False))
     return [{"role": "system", "content": system}, *messages[-MAX_HISTORY:]]
 

@@ -385,7 +385,7 @@ def build_graph(*, llm_factory: Callable[[], Any] | None = None,
             return "respond"  # 选择路径不让模型修，问题直接告诉用户
         if not state.get("problems"):
             reqs = (state.get("model_out") or {}).get("script_requests") or []
-            return "author_scripts" if reqs else "respond"
+            return "author_scripts" if reqs and PC.SCRIPT_AUTHORING else "respond"
         return "repair" if state.get("repairs", 0) < MAX_REPAIRS else "respond_blocked"
 
     def after_repair(state: PlanState) -> str:
