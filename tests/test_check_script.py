@@ -39,6 +39,32 @@ class TestStatic(unittest.TestCase):
         self.assertTrue(S.validate_source(""))
 
 
+class TestHardening(unittest.TestCase):
+    def test_format_属性被拦_防格式串穿透(self):
+        bad = "def evaluate(ctx):" + chr(10) + "    return {'status': 'pass', 'summary': '{0.__class__}'.format(ctx)}"
+        self.assertTrue(S.validate_source(bad))
+        fm = "def evaluate(ctx):" + chr(10) + "    return {'status': 'pass', 'summary': str.format_map('x', {})}"
+        self.assertTrue(S.validate_source(fm))
+
+    def test_内存炸弹被限制_不拖垮宿主(self):
+        bomb = chr(10).join(["def evaluate(ctx):", "    x = 'a' * (10 * 1024 ** 3)",
+                             "    return {'status': 'pass', 'summary': str(len(x))}"])
+        with self.assertRaises(S.ScriptError):
+            S.run_script(bomb, {"output": "", "previous": None, "previous_run": None, "device": "D", "params": {}}, timeout=10)
+
+    def test_签名_改一个字就失效(self):
+        sig = S.sign(DIFF_SCRIPT)
+        self.assertTrue(S.verify(DIFF_SCRIPT, sig))
+        self.assertFalse(S.verify(DIFF_SCRIPT + chr(10) + "# x", sig))
+        self.assertFalse(S.verify(DIFF_SCRIPT, None))
+        self.assertFalse(S.verify(DIFF_SCRIPT, "0" * 64))
+
+    def test_describe(self):
+        d = S.describe(DIFF_SCRIPT)
+        self.assertEqual(d["imports"], ["re"])
+        self.assertTrue(d["uses_previous"])
+
+
 class TestRun(unittest.TestCase):
     def ctx(self, **kw):
         return {"output": SAMPLE, "previous": None, "previous_run": None, "device": "D", "params": {}, **kw}
@@ -132,7 +158,7 @@ class TestInChecklist(unittest.TestCase):
     """判定脚本接进巡检清单：连跑几次拿上一次输出比；未审核 / 源码被改 / 脚本出错都不会静默通过。"""
 
     def _cl(self, **kw):
-        e = {"type": "script", "name": "route-diff", "source": DIFF_SCRIPT, "sha256": S.sha256(DIFF_SCRIPT), "approved": True,
+        e = {"type": "script", "name": "route-diff", "source": DIFF_SCRIPT, "sha256": S.sha256(DIFF_SCRIPT), "signature": S.sign(DIFF_SCRIPT), "approved": True,
              "severity": "critical"}
         e.update(kw)
         return {"name": "rt", "vendor": "cisco", "devices": [{"name": "V1", "host": "192.0.2.50"}],
@@ -185,9 +211,21 @@ class TestInChecklist(unittest.TestCase):
         self.assertEqual((r["state"], r["passed"]), ("error", False))
         self.assertIn("not executed", r["detail"])
 
+    def test_自己重算sha_没有签名_也不能保存和运行(self):
+        from netops_ai.inspection import checklist as CL
+
+        cl = self._cl()
+        cl["checks"][0]["expect"][0].pop("signature")
+        self.assertTrue(any("signature" in p for p in CL.validate_checklist(cl)))
+        with self.assertRaises(ValueError):
+            self._run(cl, [SAMPLE])
+        e = {"type": "script", "name": "x", "source": DIFF_SCRIPT, "sha256": S.sha256(DIFF_SCRIPT), "approved": True}
+        r = CL.evaluate_script_rule(e, SAMPLE, False, "V1", "table", CL.MetricHistory())
+        self.assertEqual(r["state"], "error")
+
     def test_脚本出错_判失败_不静默通过(self):
         boom = "def evaluate(ctx):\n    return ctx['nope']"
-        r = self._run(self._cl(source=boom, sha256=S.sha256(boom)), [SAMPLE])
+        r = self._run(self._cl(source=boom, sha256=S.sha256(boom), signature=S.sign(boom)), [SAMPLE])
         self.assertEqual(self._ev(r[0])["state"], "error")
         self.assertEqual(r[0]["devices"][0]["checks"][0]["status"], "fail")
 

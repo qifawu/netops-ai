@@ -23,16 +23,24 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import hmac
 import json
 import os
+import secrets
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 from typing import Any
 
 ALLOWED_MODULES = ("re", "json", "ipaddress", "collections", "datetime", "statistics", "math", "itertools")
 FORBIDDEN_NAMES = {"open", "eval", "exec", "compile", "__import__", "input", "breakpoint", "globals", "locals", "vars",
                    "getattr", "setattr", "delattr", "memoryview", "exit", "quit", "help", "dir"}
+#: `"{0.__class__.__mro__}".format(x)` 这类格式串属性遍历能绕过「禁止双下划线属性」的静态检查（信息泄露）：整个禁掉，
+#: 要拼字符串用 f-string（f-string 里的属性访问是 AST 节点，照样被检查）
+FORBIDDEN_ATTRS = {"format", "format_map"}
+#: 子进程内存上限（字节）。`'a' * 10**10` 这类内存炸弹在上限处被系统掐掉，不会拖垮主机
+MEMORY_LIMIT_BYTES = 256 * 1024 * 1024
 MAX_SOURCE_CHARS = 12_000
 MAX_INPUT_CHARS = 400_000
 MAX_RESULT_CHARS = 20_000
@@ -73,8 +81,9 @@ def validate_source(source: str) -> list[str]:
                 problems.append(f"script: import from {node.module!r} is not allowed")
         elif isinstance(node, ast.Name) and node.id in FORBIDDEN_NAMES:
             problems.append(f"script: use of {node.id!r} is not allowed")
-        elif isinstance(node, ast.Attribute) and node.attr.startswith("__"):
-            problems.append(f"script: attribute {node.attr!r} is not allowed")
+        elif isinstance(node, ast.Attribute) and (node.attr.startswith("__") or node.attr in FORBIDDEN_ATTRS):
+            problems.append(f"script: attribute {node.attr!r} is not allowed" +
+                            (" (use an f-string instead)" if node.attr in FORBIDDEN_ATTRS else ""))
         elif isinstance(node, (ast.Global, ast.Nonlocal)):
             problems.append("script: global / nonlocal is not allowed")
         elif isinstance(node, (ast.AsyncFunctionDef, ast.Await, ast.Yield, ast.YieldFrom)):
@@ -111,6 +120,139 @@ except BaseException as exc:  # noqa: BLE001
 """
 
 
+def _run_limited(argv: list[str], stdin: bytes, env: dict[str, str], cwd: str, timeout: float) -> tuple[bytes, bytes]:
+    """起子进程并限制资源：内存上限 + 超时杀进程。
+    Windows：Job Object（进程内存上限、关闭作业即杀进程）；POSIX：`RLIMIT_AS` / `RLIMIT_CPU`。
+    限制设置失败不阻止运行（有静态检查 + 超时兜底），但会在 stderr 里留下一句，方便排查。"""
+    kwargs: dict[str, Any] = {"stdin": subprocess.PIPE, "stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "env": env, "cwd": cwd}
+    if os.name != "nt":
+        import resource
+
+        def _limits() -> None:
+            resource.setrlimit(resource.RLIMIT_AS, (MEMORY_LIMIT_BYTES * 2, MEMORY_LIMIT_BYTES * 2))
+            resource.setrlimit(resource.RLIMIT_CPU, (int(timeout) + 2, int(timeout) + 2))
+            os.setsid()
+
+        kwargs["preexec_fn"] = _limits
+    proc = subprocess.Popen(argv, **kwargs)
+    job = _windows_job(proc) if os.name == "nt" else None
+    try:
+        return proc.communicate(stdin, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        raise
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        if job is not None:
+            import ctypes
+
+            ctypes.windll.kernel32.CloseHandle(job)  # KILL_ON_JOB_CLOSE：连同它可能起的子进程一起收掉
+
+
+def _windows_job(proc: subprocess.Popen) -> Any:
+    """把子进程放进一个带内存上限的 Job Object。返回作业句柄（失败返回 None）。"""
+    import ctypes
+    from ctypes import wintypes
+
+    class _Basic(ctypes.Structure):
+        _fields_ = [("PerProcessUserTimeLimit", ctypes.c_longlong), ("PerJobUserTimeLimit", ctypes.c_longlong),
+                    ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                    ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                    ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD), ("SchedulingClass", wintypes.DWORD)]
+
+    class _IoCounters(ctypes.Structure):
+        _fields_ = [(n, ctypes.c_ulonglong) for n in ("ReadOps", "WriteOps", "OtherOps", "ReadBytes", "WriteBytes", "OtherBytes")]
+
+    class _Extended(ctypes.Structure):
+        _fields_ = [("BasicLimitInformation", _Basic), ("IoInfo", _IoCounters), ("ProcessMemoryLimit", ctypes.c_size_t),
+                    ("JobMemoryLimit", ctypes.c_size_t), ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                    ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+    JOB_OBJECT_LIMIT_PROCESS_MEMORY = 0x100
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+    JobObjectExtendedLimitInformation = 9
+    k32 = ctypes.windll.kernel32
+    k32.CreateJobObjectW.restype = wintypes.HANDLE
+    try:
+        job = k32.CreateJobObjectW(None, None)
+        if not job:
+            return None
+        info = _Extended()
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_PROCESS_MEMORY | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        info.ProcessMemoryLimit = MEMORY_LIMIT_BYTES
+        ok = k32.SetInformationJobObject(wintypes.HANDLE(job), JobObjectExtendedLimitInformation, ctypes.byref(info),
+                                         ctypes.sizeof(info))
+        if not ok or not k32.AssignProcessToJobObject(wintypes.HANDLE(job), wintypes.HANDLE(int(proc._handle))):  # noqa: SLF001
+            k32.CloseHandle(wintypes.HANDLE(job))
+            return None
+        return job
+    except Exception:  # noqa: BLE001 - 拿不到 Job Object 不阻止运行，静态检查 + 超时仍在
+        return None
+
+
+# --------------------------------------------------------------------------- 签名（批准过的脚本不能在应用之外被改）
+
+
+def _key_path() -> Path:
+    env = os.environ.get("NETOPS_SCRIPT_KEY_FILE")
+    return Path(env) if env else Path.home() / ".netops-ai" / "script-signing-key"  # 不放进 records/：那里会被备份、同步
+
+
+def _key() -> bytes:
+    """本机签名密钥：第一次用到时随机生成，只存在这台机器。拿到 YAML 文件的人没有它，改了源码就签不出有效签名。"""
+    path = _key_path()
+    try:
+        return bytes.fromhex(path.read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        pass
+    key = secrets.token_bytes(32)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(key.hex(), encoding="ascii")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        return bytes.fromhex(path.read_text(encoding="ascii").strip())
+    except OSError:
+        return key  # 写不了就退到进程内密钥：本进程内有效，重启后需要重新批准（更安全的失败方向）
+
+
+def sign(source: str) -> str:
+    """批准时给源码签名（HMAC-SHA256）。sha256 只能发现「改了」，任何人都能重算；签名只有持有本机密钥的应用能给。"""
+    return hmac.new(_key(), sha256(source).encode("ascii"), hashlib.sha256).hexdigest()
+
+
+def verify(source: str, signature: Any) -> bool:
+    return isinstance(signature, str) and hmac.compare_digest(sign(source), signature)
+
+
+def describe(source: str) -> dict[str, Any]:
+    """给审核界面看的「这个脚本能干什么」：用了哪些模块、读不读上一次输出、有没有写 / 删之类的调用。静态分析，只是辅助。"""
+    imports: list[str] = []
+    uses_previous = False
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return {"imports": [], "uses_previous": False, "loops": 0, "functions": 0}
+    loops = functions = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports += [a.name.split(".")[0] for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imports.append(node.module.split(".")[0])
+        elif isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant) and node.slice.value == "previous":
+            uses_previous = True
+        elif isinstance(node, (ast.For, ast.While, ast.comprehension)):
+            loops += 1
+        elif isinstance(node, ast.FunctionDef):
+            functions += 1
+    return {"imports": sorted(set(imports)), "uses_previous": uses_previous, "loops": loops, "functions": functions,
+            "lines": len(source.strip().splitlines())}
+
+
 def _normalize(out: Any) -> dict[str, Any]:
     if not isinstance(out, dict):
         raise ScriptError("evaluate() must return a dict")
@@ -144,15 +286,15 @@ def run_script(source: str, ctx: dict[str, Any], *, timeout: float = TIMEOUT_SEC
         env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
     try:
         with tempfile.TemporaryDirectory() as cwd:  # 空目录当工作目录，脚本旁边没有任何文件
-            p = subprocess.run([sys.executable, "-I", "-c", _RUNNER], input=payload.encode("utf-8"), capture_output=True,
-                               timeout=timeout, env=env, cwd=cwd)
+            stdout, stderr = _run_limited([sys.executable, "-I", "-c", _RUNNER], payload.encode("utf-8"), env, cwd, timeout)
     except subprocess.TimeoutExpired as exc:
         raise ScriptError(f"script timed out after {timeout:g} s") from exc
-    raw = p.stdout.decode("utf-8", "replace")[:MAX_RESULT_CHARS * 2]
+    raw = stdout.decode("utf-8", "replace")[:MAX_RESULT_CHARS * 2]
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise ScriptError("script produced no valid result: " + (p.stderr.decode("utf-8", "replace")[-200:] or raw[:200])) from exc
+        hint = stderr.decode("utf-8", "replace")[-200:] or raw[:200]
+        raise ScriptError("script produced no valid result (it may have exceeded the memory limit): " + hint) from exc
     if not data.get("ok"):
         raise ScriptError(str(data.get("error") or "script failed"))
     return _normalize(data["result"])

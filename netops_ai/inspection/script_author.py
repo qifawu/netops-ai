@@ -93,6 +93,13 @@ def _feedback(test: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def redact_secrets(text: str) -> str:
+    """口令 / 团体字 / 密钥所在行，关键词后面的整截换成占位；换行原样保留（自测的文本替换要在原样本上找得到）。"""
+    from netops_ai.configs import _SECRET_RE
+
+    return "".join(_SECRET_RE.sub(lambda m: m.group(1) + " <REDACTED>", line) for line in text.splitlines(keepends=True))
+
+
 def author_script(goal: str, command: str, sample: str, llm: Any, *, lang: str = "zh", max_rounds: int = MAX_ROUNDS) -> dict[str, Any]:
     """返回 {ok, source, sha256, explanation, tests, rounds, error}。ok = 通过静态检查、没崩、确定性、各用例合理。
     没写成时 ok=False，`source` 保留最后一版（可能为空）和 `tests`，给用户看卡在哪。"""
@@ -103,6 +110,14 @@ def author_script(goal: str, command: str, sample: str, llm: Any, *, lang: str =
     if not sample.strip():
         out["error"] = "the command returned no output on the sample device; cannot write a script from nothing"
         return out
+    from netops_ai.devices.whitelist import _SENSITIVE_MARKERS
+
+    low = command.lower()
+    if any(m in low for m in _SENSITIVE_MARKERS if m != "this"):
+        out["error"] = ("this command's output may contain passwords or keys; a script is not written from it "
+                        "(its output would be sent to the model)")
+        return out
+    sample = redact_secrets(sample)  # 样本要发给模型：口令 / 团体字 / 密钥行先脱敏，自测也用脱敏后的同一份
     feedback, prev = "", ""
     for rnd in range(1, max_rounds + 1):
         out["rounds"] = rnd

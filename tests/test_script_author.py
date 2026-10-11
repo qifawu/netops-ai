@@ -83,6 +83,8 @@ class TestAuthor(unittest.TestCase):
         cl = {"name": "p", "vendor": "cisco", "devices": [{"name": "V1", "host": "192.0.2.50"}], "checks": [chk]}
         self.assertTrue(any("not been reviewed" in p for p in CL.validate_checklist(cl)))
         chk["expect"][0]["approved"] = True
+        self.assertTrue(any("signature" in p for p in CL.validate_checklist(cl)))  # 只改 approved 不行，得有应用签发的签名
+        chk["expect"][0]["signature"] = CS.sign(chk["expect"][0]["source"])
         self.assertEqual(CL.validate_checklist(cl), [])
 
 

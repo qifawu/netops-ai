@@ -99,6 +99,8 @@ def pending_scripts(draft: dict[str, Any] | None) -> list[dict[str, Any]]:
 
 def script_review_widget(draft: dict[str, Any], lang: str = "zh") -> dict[str, Any] | None:
     """审核气泡：源码、自测用例结果、真实样本的前几行，一条一条批准或拒绝。没有待审脚本就没有。"""
+    from netops_ai.inspection import check_script as CS
+
     pend = pending_scripts(draft)
     if not pend:
         return None
@@ -110,6 +112,7 @@ def script_review_widget(draft: dict[str, Any], lang: str = "zh") -> dict[str, A
         t = r.get("tests") or {}
         items.append({"check_id": c["id"], "title": c.get("title") or c["id"], "command": c.get("command"), "goal": r.get("goal", ""),
                       "explanation": r.get("explanation", ""), "source": e.get("source", ""), "sha256": e.get("sha256", ""),
+                      "capabilities": CS.describe(e.get("source", "")),
                       "ok": bool(r.get("ok")), "error": r.get("error", ""), "rounds": r.get("rounds", 1),
                       "sample_device": r.get("sample_device", ""), "sample_head": r.get("sample_head", ""),
                       "cases": [{"name": x.get("name"), "status": x.get("status"), "summary": x.get("summary", ""),
@@ -227,6 +230,7 @@ def _apply_script_review(base: dict[str, Any], value: dict[str, Any], lang: str)
             for e in c["expect"]:
                 if e.get("type") == "script":
                     e["sha256"] = CS.sha256(e.get("source", ""))
+                    e["signature"] = CS.sign(e.get("source", ""))
                     e["approved"] = True
     rev["approved"] = True
     return new, [], (f"已批准脚本检查「{chk.get('title') or cid}」" if zh else f"Approved the script check {chk.get('title') or cid!r}")

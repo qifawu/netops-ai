@@ -222,7 +222,7 @@ export function Hints({ hints, onClose }: { hints: Hint[]; onClose: (id: string)
 
 
 export type ScriptItem = {
-  check_id: string; title: string; command: string; goal: string; explanation: string; source: string; sha256: string;
+  check_id: string; title: string; command: string; goal: string; explanation: string; source: string; sha256: string; capabilities?: { imports: string[]; uses_previous: boolean; lines?: number };
   ok: boolean; error: string; rounds: number; sample_device: string; sample_head: string;
   cases: { name: string; status: string; summary: string; findings: string[]; plausible: boolean; note: string }[];
 };
@@ -270,6 +270,9 @@ export function ScriptReview({ w, onSubmit }: { w: Widget; onSubmit: (s: Selecti
                 onClick={() => setOpen((o) => ({ ...o, [it.check_id + ":src"]: !o[it.check_id + ":src"] }))}>{t("plans.script.source")}</button>
               <button type="button" className="hover:text-brand" aria-expanded={!!open[it.check_id + ":smp"]}
                 onClick={() => setOpen((o) => ({ ...o, [it.check_id + ":smp"]: !o[it.check_id + ":smp"] }))}>{t("plans.script.sample")}{it.sample_device ? ` · ${it.sample_device}` : ""}</button>
+              {it.capabilities && (
+                <span>{t("plans.script.caps")}: {it.capabilities.lines ?? "-"} {t("plans.script.lines")} · {it.capabilities.imports.join(", ") || t("plans.script.noImports")}</span>
+              )}
               <span className="font-mono">sha256 {it.sha256.slice(0, 12)}</span>
             </div>
             {open[it.check_id + ":src"] && <pre className="term mt-1 max-h-72 overflow-auto px-2 py-1.5 text-[0.71875rem] whitespace-pre" data-testid="script-source">{it.source}</pre>}

@@ -250,6 +250,8 @@ def _validate_script_expect(where: str, e: dict[str, Any]) -> list[str]:
         out.append(f"{where}.sha256: does not match the source (the script was changed after review)")
     if e.get("approved") is not True:
         out.append(f"{where}.approved: the script has not been reviewed and approved by the user yet")
+    elif not CS.verify(str(e.get("source") or ""), e.get("signature")):
+        out.append(f"{where}.signature: the approval signature is missing or invalid (the script must be approved again in the app)")
     if e.get("severity", "warning") not in SEVERITIES:
         out.append(f"{where}.severity: one of {', '.join(SEVERITIES)}")
     if not isinstance(e.get("params", {}), dict):
@@ -485,7 +487,8 @@ def evaluate_script_rule(e: dict[str, Any], output: str, truncated: bool, dev: s
     out: dict[str, Any] = {"type": "script", "severity": e.get("severity", "warning"), "name": e.get("name") or "script",
                            "value": f"script {e.get('name') or ''} {str(e.get('sha256') or '')[:8]}".strip(), "findings": [],
                            "reference_run_id": None, "script_metrics": {}, "truncated": truncated}
-    if e.get("approved") is not True or e.get("sha256") != CS.sha256(str(e.get("source") or "")):
+    if (e.get("approved") is not True or e.get("sha256") != CS.sha256(str(e.get("source") or ""))
+            or not CS.verify(str(e.get("source") or ""), e.get("signature"))):
         return {**out, "passed": False, "state": "error", "detail": "script is not approved or was changed after review; not executed"}
     ref = hist.snapshot(dev, cid)
     prev_text = ref[2] if ref else None
