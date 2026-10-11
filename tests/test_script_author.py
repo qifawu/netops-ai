@@ -30,6 +30,16 @@ class FakeLLM:
                                                                ensure_ascii=False))
 
 
+class TestRedact(unittest.TestCase):
+    def test_口令和团体字行被脱敏_其余行与换行原样(self):
+        nl = chr(10)
+        text = "snmp-server community abc RO" + nl + "enable secret 5 xyz" + nl + "S 203.0.113.0/25 via 192.0.2.2" + nl
+        out = SA.redact_secrets(text)
+        self.assertNotIn("abc", out)
+        self.assertNotIn("xyz", out)
+        self.assertTrue(out.endswith("S 203.0.113.0/25 via 192.0.2.2" + nl))
+
+
 class TestAuthor(unittest.TestCase):
     def test_一次写对(self):
         llm = FakeLLM([DIFF_SCRIPT])

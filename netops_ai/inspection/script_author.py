@@ -93,10 +93,12 @@ def _feedback(test: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+_SECRET_RE = re.compile(
+    r"(?i)\b(secret|password|community|key-string|authentication-key|message-digest-key|cipher|pre-shared-key)(?=\s).*$")
+
+
 def redact_secrets(text: str) -> str:
     """口令 / 团体字 / 密钥所在行，关键词后面的整截换成占位；换行原样保留（自测的文本替换要在原样本上找得到）。"""
-    from netops_ai.configs import _SECRET_RE
-
     return "".join(_SECRET_RE.sub(lambda m: m.group(1) + " <REDACTED>", line) for line in text.splitlines(keepends=True))
 
 
