@@ -42,7 +42,7 @@ def plan_json_schema() -> dict:
     """strict structured output。所有字段都必填（strict 的要求），「不用」就填空串 / 0 / 空数组。"""
     check = {
         "type": "object", "additionalProperties": False,
-        "required": ["template", "id", "title", "command", "devices", "expect", "extract"],
+        "required": ["template", "id", "title", "command", "devices", "expect", "extract", "table_diff"],
         "properties": {
             "template": {"type": "string", "description": "Template id from the template library, or \"\" for a custom check."},
             "id": {"type": "string", "description": "Custom checks only: English identifier, letters/digits/_.-; \"\" when template is set."},
@@ -53,6 +53,19 @@ def plan_json_schema() -> dict:
                 "type": "object", "additionalProperties": False, "required": ["type", "value", "severity"],
                 "properties": {"type": {"type": "string", "enum": list(EXPECT_TYPES)}, "value": {"type": "string"},
                                "severity": {"type": "string", "enum": list(SEVERITIES)}}}},
+            "table_diff": {"type": "array", "description": "Custom checks only. Compare the command's output with the previous run "
+                           "AS A TABLE: it is parsed into rows (one per route / ARP entry / neighbor ...) with named fields, rows are "
+                           "matched by `key` fields, and added / removed / changed rows are reported. [] when not needed.",
+                           "items": {
+                "type": "object", "additionalProperties": False,
+                "required": ["key", "compare", "ignore_fields", "severity", "max_added", "max_removed", "max_changed", "template"],
+                "properties": {
+                    "key": {**_str_list(), "description": "Field names that identify a row (e.g. network, prefix_length, nexthop_ip)."},
+                    "compare": {**_str_list(), "description": "Fields whose change should be reported; [] = every field except key and volatile ones (uptime, age)."},
+                    "ignore_fields": {**_str_list(), "description": "Fields that change on their own and must not count; [] if none."},
+                    "severity": {"type": "string", "enum": list(SEVERITIES)},
+                    "max_added": {"type": "integer"}, "max_removed": {"type": "integer"}, "max_changed": {"type": "integer"},
+                    "template": {"type": "string", "description": "A TextFSM template, ONLY when the command has no built-in parser; \"\" otherwise."}}}},
             "extract": {"type": "array", "items": {
                 "type": "object", "additionalProperties": False, "required": ["name", "regex", "cast", "agg"],
                 "properties": {"name": {"type": "string"}, "regex": {"type": "string", "description": "One capture group."},
@@ -130,6 +143,7 @@ Rules for the draft:
 - checks: prefer templates — set `template` to a template id and leave id/title/command/expect/extract empty. Write a custom check (template "") only when no template fits: one full read-only `show ...` command (no abbreviations, no placeholders), preferably from `command_catalog`, expect/extract regexes that match real Cisco IOS output. Never propose configuration, clear, reload, debug, copy or any command that changes the device: a whitelist rejects them and they never reach the device.
 - A check's `devices` = [] means every plan device; otherwise list the subset (e.g. BGP only on core).
 - When the user needs something NO template and NO custom check with expect/extract rules can express — typically a judgement that compares the whole output with the previous run entry by entry (routing table detail diff, ARP/MAC table changes, ACL hit counters moving, "these neighbors must stay the same"), or parsing a table and applying their own logic — do NOT pretend a template covers it and do NOT tell the user it is impossible. Put it in `script_requests` (check_id, title, one read-only show command, and the user's goal in full). The assistant then takes a real output sample from a device, writes a small sandboxed script, tests it, and shows the code to the user for approval. Do not put that check in `checks`; say in `reply` that you are writing and testing a script and the user will review it. Revise an existing script check by sending its id again with the new goal.
+- Detailed comparison of ANY table-like command with the previous run (routing table entries, ARP, MAC table, neighbors, interface states ...) → a custom check with ONE `table_diff` entry: `key` = the fields that identify a row, `compare` = the fields whose change matters (or [] for all non-volatile ones), `ignore_fields` = fields that change by themselves. Field names come from the command's parser (for `show ip route`: vrf, protocol, type, network, prefix_length, distance, metric, nexthop_ip, nexthop_vrf, nexthop_if, uptime, flag; for `show ip arp`: protocol, ip_address, age, mac_address, type, interface). If a field name is wrong the validator tells you the real ones — fix and resend. Only when the command has no built-in parser, write a TextFSM `template` yourself from the sample output you were given. Prefer an existing template id when one fits (e.g. `route_table_diff`).
 - "Alert when the number of routes drops compared with last time" (or similar "fewer than the previous run") → use the `route_count` template: it counts the routing table entries and compares each run with the previous one (the first run records a baseline).
 - "Which routes changed / routing table details compared with last time / route table diff" → use the `route_table_diff` template: it compares the whole routing table line by line with the previous run and lists the routes that appeared or disappeared. A request for the routing table is NOT a request for OSPF neighbors or BGP sessions; do not add those unless the user names them.
 - schedule: `every_minutes` (integer) or `daily_at` "HH:MM" (server local time); set the unused one to 0 / "". If the user has not said, set both to 0 / "" and ask.
@@ -316,6 +330,20 @@ def draft_from_model(out: dict[str, Any], prev: dict[str, Any] | None, topology:
                   for e in c.get("expect") or [] if isinstance(e, dict)]
         extract = [{"name": x.get("name"), "regex": x.get("regex"), "cast": x.get("cast", "float"), "agg": x.get("agg", "first")}
                    for x in c.get("extract") or [] if isinstance(x, dict)]
+        for j, t in enumerate(c.get("table_diff") or []):
+            if not isinstance(t, dict):
+                continue
+            rule: dict[str, Any] = {"type": "table_diff_vs_previous", "key": [str(x) for x in t.get("key") or []],
+                                    "severity": t.get("severity", "warning"), "max_added": int(t.get("max_added") or 0),
+                                    "max_removed": int(t.get("max_removed") or 0), "max_changed": int(t.get("max_changed") or 0)}
+            if t.get("compare"):
+                rule["compare"] = [str(x) for x in t["compare"]]
+            if t.get("ignore_fields"):
+                rule["ignore_fields"] = [str(x) for x in t["ignore_fields"]]
+            if str(t.get("template") or "").strip():
+                rule["template"] = str(t["template"])
+            problems += table_rule_problems(f"checks[{i}].table_diff[{j}]", item["command"], rule, draft.get("vendor", "cisco"))
+            expect.append(rule)
         if expect:
             item["expect"] = expect
         if extract:
@@ -331,6 +359,32 @@ def draft_from_model(out: dict[str, Any], prev: dict[str, Any] | None, topology:
     elif "enabled" in prev or "enabled" in out:
         draft["enabled"] = True
     return draft, problems
+
+
+def table_rule_problems(where: str, command: str, rule: dict[str, Any], vendor: str) -> list[str]:
+    """表对表规则落进草案前核一遍：命令有没有解析器（或自带模板能不能解析）、key / 比较字段是不是解析器真有的字段。
+    不过的原样回给模型（走现有的修复回合），它能看到可选字段名，改一轮就对。"""
+    from netops_ai.inspection import table_parse as TP
+
+    if rule.get("template"):
+        probs = TP.validate_template(rule["template"])
+        if probs:
+            return [f"{where}: {probs[0]}"]
+        import io
+
+        import textfsm
+
+        fields = [h.lower() for h in textfsm.TextFSM(io.StringIO(rule["template"])).header]
+    else:
+        fields = TP.describe(command, vendor=vendor)
+        if fields is None:
+            return [f"{where}: the command {command!r} has no built-in table parser; provide a TextFSM `template`, "
+                    "or use a different command / a plain expect rule"]
+    wanted = [*rule.get("key", []), *rule.get("compare", []), *rule.get("ignore_fields", [])]
+    bad = [f for f in wanted if f not in fields]
+    if bad:
+        return [f"{where}: unknown field(s) {bad}; the parser provides: {', '.join(fields)}"]
+    return []
 
 
 def _patch_from_model(s: dict[str, Any]) -> dict[str, Any] | None:

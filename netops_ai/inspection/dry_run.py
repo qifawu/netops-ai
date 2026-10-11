@@ -41,7 +41,8 @@ def _status(res: Any) -> tuple[str, str]:
     return "ok", ""
 
 
-def _run_one(adapter: Any, check: dict[str, Any], dev: str, hist: CL.MetricHistory, head_lines: int) -> dict[str, Any]:
+def _run_one(adapter: Any, check: dict[str, Any], dev: str, hist: CL.MetricHistory, head_lines: int,
+             vendor: str = "cisco") -> dict[str, Any]:
     t0 = time.monotonic()
     try:
         res = adapter.run(check["command"])
@@ -57,7 +58,7 @@ def _run_one(adapter: Any, check: dict[str, Any], dev: str, hist: CL.MetricHisto
         return item
     for x in check.get("extract") or []:
         item["metrics"][x["name"]] = CL._extract(x, out)
-    item["evaluations"] = CL.evaluate_expectations(check, out, item["metrics"], dev, hist)
+    item["evaluations"] = CL.evaluate_expectations(check, out, item["metrics"], dev, hist, vendor)
     item["would_pass"] = not any(r.get("passed") is False for r in item["evaluations"])
     return item
 
@@ -110,7 +111,7 @@ def dry_run(draft: dict[str, Any], adapter_factory: Callable[[Any], Any], *, dev
             for c in checks:
                 if cancel.is_set():
                     break
-                out["checks"].append(_run_one(adapter, c, d["name"], hist, head_lines))
+                out["checks"].append(_run_one(adapter, c, d["name"], hist, head_lines, draft.get("vendor", "cisco")))
                 tick()
         finally:
             close = getattr(adapter, "close", None)

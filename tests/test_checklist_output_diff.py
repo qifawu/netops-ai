@@ -89,7 +89,7 @@ class TestOutputDiff(unittest.TestCase):
         r = run_seq(rule(), [TABLE_A, TABLE_MINUS])
         e = ev(r[1])
         self.assertEqual((e["added"], e["removed"], e["passed"]), (0, 1, False))
-        self.assertTrue(any("203.0.113.128/25" in x for x in e["removed_sample"]), e["removed_sample"])
+        self.assertTrue(any("203.0.113.128" in x for x in e["removed_sample"]), e["removed_sample"])
         self.assertEqual(r[1]["devices"][0]["checks"][0]["status"], "fail")
         self.assertEqual(r[1]["devices"][0]["checks"][0]["severity"], "critical")
 

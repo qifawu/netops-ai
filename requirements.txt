@@ -20,6 +20,9 @@ langchain-google-genai==4.4.0
 langchain-anthropic==1.7.2
 
 paramiko==5.0.0
+# 输出解析成行记录表（通用表对表比较用）：TextFSM + 社区维护的命令模板库
+textfsm==2.1.0
+ntc-templates==9.3.0
 PyYAML==6.0.3
 ruamel.yaml==0.19.1
 matplotlib==3.11.2

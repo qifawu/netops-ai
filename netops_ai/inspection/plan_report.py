@@ -71,7 +71,8 @@ def diff_summary(e: dict[str, Any]) -> str:
         return RULE_STATE_CN.get(state, state or "")
     a = "?" if e.get("added") is None else e["added"]
     r = "?" if e.get("removed") is None else e["removed"]
-    text = f"与上次相比 +{a} / -{r}（对照运行 {e.get('reference_run_id')}）：{RULE_STATE_CN.get(state, state or '')}"
+    ch = f" / ~{e['changed']}" if e.get("changed") is not None else ""
+    text = f"与上次相比 +{a} / -{r}{ch}（对照运行 {e.get('reference_run_id')}）：{RULE_STATE_CN.get(state, state or '')}"
     trunc = e.get("truncated") or {}
     if trunc.get("current") or trunc.get("reference"):
         text += "；" + "、".join(n for n, k in (("本次输出", "current"), ("对照输出", "reference")) if trunc.get(k)) + "超过上限被截断，只比较了采到的部分"
@@ -143,9 +144,10 @@ def build_blocks(plan: dict[str, Any], runs: list[dict[str, Any]], trend: dict[s
     for d in last.get("devices") or []:
         for c in d.get("checks") or []:
             for e in c.get("evaluations") or []:
-                if e.get("type") in DIFF_EXPECT_TYPES and (e.get("added_sample") or e.get("removed_sample")):
-                    lines = [f"+ {x}" for x in e.get("added_sample") or []] + [f"- {x}" for x in e.get("removed_sample") or []]
-                    more = (e.get("added") or 0) + (e.get("removed") or 0) - len(lines)
+                if e.get("type") in DIFF_EXPECT_TYPES and (e.get("added_sample") or e.get("removed_sample") or e.get("changed_sample")):
+                    lines = ([f"+ {x}" for x in e.get("added_sample") or []] + [f"- {x}" for x in e.get("removed_sample") or []]
+                             + [f"~ {x}" for x in e.get("changed_sample") or []])
+                    more = (e.get("added") or 0) + (e.get("removed") or 0) + (e.get("changed") or 0) - len(lines)
                     diff_rows.append((d.get("name"), c.get("id"), diff_summary(e), "\n".join(lines) + (f"\n……另有 {more} 行未列出" if more > 0 else "")))
     if diff_rows:
         blocks.append(("h3", "明细对比（与上一次成功采集相比，新增 + / 消失 -）"))

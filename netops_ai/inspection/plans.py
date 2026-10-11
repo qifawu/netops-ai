@@ -160,7 +160,12 @@ TEMPLATES: dict[str, dict[str, Any]] = {
         "check": {
             # begin Gateway：跳过开头那段固定的代码说明；每次都一样的命令，输出顺序稳定
             "command": "show ip route | begin Gateway",
-            "expect": [{"type": "output_diff_vs_previous", "severity": "critical", "max_added": 0, "max_removed": 0,
+            # 解析成路由表（vrf / 前缀 / 下一跳 / 出接口为 key；协议 / 管理距离 / metric 变了也报）按行对表；
+            # 解析不了（没有这个平台的模板、输出格式变了）退回下面这组逐行文本对比，不会静默放过
+            "expect": [{"type": "table_diff_vs_previous", "severity": "critical", "max_added": 0, "max_removed": 0,
+                        "max_changed": 0, "fallback": "text",
+                        "key": ["vrf", "network", "prefix_length", "nexthop_ip", "nexthop_if"],
+                        "compare": ["protocol", "type", "distance", "metric"],
                         # 「is variably subnetted, N subnets」这种汇总行里的数字随路由增减变，不是路由本身
                         "ignore_regex": [r"is (?:variably )?subnetted"],
                         # 路由老化时间（01:50:02 / 1d02h / 2w3d）每次都变，剪掉

@@ -87,7 +87,8 @@ TEXT_EXPECT_TYPES = ("contains", "not_contains", "regex", "not_regex")
 #: 有状态的指标规则：看提取出来的数字，跟上一次 / 基线 / 固定阈值比
 METRIC_EXPECT_TYPES = ("metric_vs_previous", "metric_threshold", "metric_vs_baseline")
 #: 有状态的明细对比：整份输出按行集合跟上一次成功采到的输出比（新增 / 消失了哪些行）
-DIFF_EXPECT_TYPES = ("output_diff_vs_previous",)
+TABLE_EXPECT_TYPES = ("table_diff_vs_previous",)  # 解析成行记录表后按 key 字段对表（通用，见 table_diff.py）
+DIFF_EXPECT_TYPES = ("output_diff_vs_previous",) + TABLE_EXPECT_TYPES
 #: 助手按用户需求写、用户审核过的判定脚本（check_script.py）：模板和固定规则表达不了的需求
 SCRIPT_EXPECT_TYPES = ("script",)
 STATEFUL_EXPECT_TYPES = METRIC_EXPECT_TYPES + DIFF_EXPECT_TYPES + SCRIPT_EXPECT_TYPES
@@ -262,6 +263,13 @@ def _validate_script_expect(where: str, e: dict[str, Any]) -> list[str]:
 def _validate_expect(where: str, e: Any, metric_names: set[str] | None = None) -> list[str]:
     if not isinstance(e, dict):
         return [f"{where}: must be a mapping"]
+    if e.get("type") in TABLE_EXPECT_TYPES:
+        from netops_ai.inspection import table_diff as TD
+
+        errs = TD.validate(where, e, SEVERITIES)
+        if e.get("fallback") == "text":  # 退回文本对比时用到的那组正则也要先验过，不然运行时才炸
+            errs += [x for x in _validate_diff_expect(where, e) if x not in errs]
+        return errs
     if e.get("type") in DIFF_EXPECT_TYPES:
         return _validate_diff_expect(where, e)
     if e.get("type") in SCRIPT_EXPECT_TYPES:
@@ -457,13 +465,24 @@ def evaluate_diff_rule(e: dict[str, Any], output: str, truncated: bool, dev: str
     return {**out, "passed": not bad, "state": state, "detail": detail}
 
 
+def evaluate_table_rule(e: dict[str, Any], output: str, truncated: bool, dev: str, cid: str, hist: MetricHistory,
+                        command: str, vendor: str) -> dict[str, Any]:
+    from netops_ai.inspection import table_diff as TD
+
+    return TD.evaluate(e, output, truncated, command, vendor, hist.snapshot(dev, cid), hist.ever_attempted(dev, cid),
+                       text_fallback=lambda: evaluate_diff_rule({**e, "type": "output_diff_vs_previous"}, output, truncated,
+                                                                dev, cid, hist))
+
+
 def evaluate_expectations(check: dict[str, Any], output: str, metrics: dict[str, Any], dev: str,
-                          hist: MetricHistory) -> list[dict[str, Any]]:
+                          hist: MetricHistory, vendor: str = "cisco") -> list[dict[str, Any]]:
     """一条检查项的全部判定（正式运行和试运行共用）。明细对比只看存得下的那部分（cap_diff_output）。"""
     evals = []
     diff_text, diff_trunc = cap_diff_output(output)
     for e in check.get("expect") or []:
-        if e.get("type") in DIFF_EXPECT_TYPES:
+        if e.get("type") in TABLE_EXPECT_TYPES:
+            evals.append(evaluate_table_rule(e, diff_text, diff_trunc, dev, check["id"], hist, check.get("command", ""), vendor))
+        elif e.get("type") in DIFF_EXPECT_TYPES:
             evals.append(evaluate_diff_rule(e, diff_text, diff_trunc, dev, check["id"], hist))
         elif e.get("type") in SCRIPT_EXPECT_TYPES:
             evals.append(evaluate_script_rule(e, diff_text, diff_trunc, dev, check["id"], hist))
@@ -554,7 +573,8 @@ def evaluate_metric_rule(e: dict[str, Any], current: Any, dev: str, cid: str, hi
             "detail": f"{current} vs {refv} ({'run ' + run_id if run_id else 'fixed baseline'}): {'+' if delta >= 0 else ''}{delta:g}, allowed {tol:g}"}
 
 
-def _run_check(adapter: Any, check: dict[str, Any], dev_name: str = "", hist: MetricHistory | None = None) -> dict[str, Any]:
+def _run_check(adapter: Any, check: dict[str, Any], dev_name: str = "", hist: MetricHistory | None = None,
+               vendor: str = "cisco") -> dict[str, Any]:
     res = adapter.run(check["command"])
     item: dict[str, Any] = {"id": check["id"], "command": check["command"], "evaluations": [], "metrics": {}}
     if not res.allowed:
@@ -572,7 +592,7 @@ def _run_check(adapter: Any, check: dict[str, Any], dev_name: str = "", hist: Me
     if has_diff_rule(check):
         # 下次对比的参考：只存这一份（不进每条判定）；不可达 / 被拒 / 出错的运行走不到这里，不会覆盖基线
         item["diff_output"], item["diff_truncated"] = cap_diff_output(output)
-    item["evaluations"] = evaluate_expectations(check, output, item["metrics"], dev_name, hist or MetricHistory())
+    item["evaluations"] = evaluate_expectations(check, output, item["metrics"], dev_name, hist or MetricHistory(), vendor)
     for ev in item["evaluations"]:
         if ev.get("script_metrics"):  # 脚本自己算出来的数（如路由条数）和提取出来的一样进趋势表
             item["metrics"].update(ev["script_metrics"])
@@ -605,7 +625,7 @@ def run_checklist(cl: dict[str, Any], adapter_factory: AdapterFactory, *, histor
             for c in cl["checks"]:
                 if c.get("devices") is not None and d["name"] not in c["devices"]:
                     continue  # 这条检查只针对别的设备
-                dev["checks"].append(_run_check(adapter, c, d["name"], hist))
+                dev["checks"].append(_run_check(adapter, c, d["name"], hist, cl.get("vendor", "cisco")))
         finally:
             close = getattr(adapter, "close", None)
             if callable(close):
@@ -721,8 +741,10 @@ def trend_table(history: list[dict[str, Any]]) -> str:
                             if e.get("state") in ("pass", "fail", "partial"):
                                 a = "?" if e.get("added") is None else e["added"]
                                 rm = "?" if e.get("removed") is None else e["removed"]
-                                samples = "; ".join([f"+{s}" for s in (e.get("added_sample") or [])[:3]] + [f"-{s}" for s in (e.get("removed_sample") or [])[:3]])
-                                got["output diff"] = f"{e['state']}(+{a}/-{rm}" + (f": {samples}" if samples else "") + ")"
+                                samples = "; ".join([f"+{s}" for s in (e.get("added_sample") or [])[:3]] + [f"-{s}" for s in (e.get("removed_sample") or [])[:3]]
+                                                    + [f"~{s}" for s in (e.get("changed_sample") or [])[:3]])
+                                ch = f"/~{e['changed']}" if e.get("changed") is not None else ""
+                                got["output diff"] = f"{e['state']}(+{a}/-{rm}{ch}" + (f": {samples}" if samples else "") + ")"
                             else:
                                 got["output diff"] = str(e.get("state"))
                         elif e.get("type") in METRIC_EXPECT_TYPES:
