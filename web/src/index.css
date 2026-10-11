@@ -8,27 +8,27 @@
    - ok / warn / bad 只表达语义（正常 / 警告待审 / 故障），不拿来区分类别。
    - 分类标签（故障类型、来源）一律中性灰框，靠文字区分。 */
 @theme {
-  --color-page: #eceff2;
+  --color-page: #f5f6f8;
   --color-card: #ffffff;
-  --color-line: #d5dbe1;
-  --color-ink: #1a222b;
-  --color-dim: #5b6672;
-  --color-brand: #0f5c7a;   /* 主色：深青蓝。选中 / 主按钮 / 链接 */
+  --color-line: #e3e6eb;
+  --color-ink: #16181d;
+  --color-dim: #5b6270;
+  --color-brand: #1f5fbf;   /* 主色：蓝。选中 / 主按钮 / 链接 */
   --color-ok: #23803d;      /* 正常 · 高置信 */
   --color-warn: #b8650a;    /* 警告 · 待审 · 需人工 */
   --color-bad: #c42b2b;     /* 故障 · 低置信 */
   --color-term: #161b21;    /* 终端 / 原始回显 */
-  --color-nav: #1d252e;     /* 侧边栏 */
+  --color-nav: #ffffff;     /* 侧边栏：白底，跟内容区用一条细线分开 */
 
-  /* 圆角统一压小：卡片 4px，控件 3px，标签 2px。 */
-  --radius-xs: 1px;
-  --radius-sm: 2px;
-  --radius-md: 3px;
-  --radius-lg: 3px;
-  --radius-xl: 4px;
-  --radius-2xl: 4px;
-  --radius-3xl: 6px;
-  --radius-4xl: 6px;
+  /* 圆角：卡片 10px，控件 8px，标签 6px。以前 2~4px 的直角方块太像终端，2026-10-11 放宽。 */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl: 12px;
+  --radius-3xl: 16px;
+  --radius-4xl: 20px;
 
   /* 去掉漂浮感：阴影只留给弹出层，且很轻。 */
   --shadow-xs: none;
@@ -113,8 +113,9 @@ body { background: var(--color-page); color: var(--color-ink); }
 ::-webkit-scrollbar-thumb:hover { background: #8e98a3; }
 /* 旧类名保留（会员页还在用），但不再有投影。 */
 .card-shadow { box-shadow: none; }
-/* 数字：等宽字体 + 等宽数字，KPI / 时间 / 计数一律用它，列对齐、跳动时不晃。 */
-.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+/* 数字：正文字体 + 等宽数字（tabular-nums），列对齐、跳动时不晃。
+   以前这里用等宽字体，满屏 Consolas 一股终端味；等宽字体只留给 IP、接口名、原始回显。 */
+.num { font-variant-numeric: tabular-nums; }
 @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 .pulse-dot { animation: pulse-dot 1.2s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .pulse-dot { animation: none; } }

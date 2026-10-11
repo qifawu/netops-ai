@@ -432,6 +432,7 @@ function PlanBuilder({ mode, plan, seed, onClose, onSaved }: { mode: "new" | "ed
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [ifname, setIfname] = useState<Record<string, string>>({});
   const [closedHints, setClosedHints] = useState<Set<string>>(new Set());
+  const [declined, setDeclined] = useState<Set<string>>(new Set());
   const dryRun = useDryRun(draft);
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -478,11 +479,11 @@ function PlanBuilder({ mode, plan, seed, onClose, onSaved }: { mode: "new" | "ed
     turn(history, draft); // 开场白是固定话术，发请求时滤掉，不进模型上下文
   };
   /** 采纳 / 改周期 / 改名：确定性地并进草案，后端重新校验；不改变图停在哪（确认时提交的是这份最新草案，保存前照样再校验）。 */
-  const patchDraft = async (body: { patch?: unknown; draft?: Draft | null }, sid?: string) => {
+  const patchDraft = async (body: { patch?: unknown; draft?: Draft | null; dismiss?: Suggestion }, sid?: string) => {
     const last = [...msgs].reverse().find((m) => m.role === "assistant");
     const shown = (last?.suggestions ?? []).filter((s) => s.patch);
     const r = await call<Turn & { live_suggestions: string[] }>("POST", "/api/inspection/plans/draft",
-      { draft: body.draft ?? draft, patch: body.patch ?? null, lang, suggestions: shown });
+      { draft: body.draft ?? draft, patch: body.patch ?? null, dismiss: body.dismiss ?? null, lang, suggestions: shown });
     if (!r.ok) return;
     setDraft(r.data.draft);
     setValid(r.data.validation);
@@ -566,7 +567,7 @@ function PlanBuilder({ mode, plan, seed, onClose, onSaved }: { mode: "new" | "ed
                       : <CheckPicker key={m.widget.id} w={m.widget} onSubmit={(sel, sum) => submitWidget(i, sel, sum)} />)}
               {(m.suggestions?.length ?? 0) > 0 && (
                 <div className="mt-2 space-y-1.5" data-testid="plan-suggestions">
-                  {m.suggestions!.map((s) => (
+                  {m.suggestions!.filter((s) => !declined.has(`${i}:${s.id}`)).map((s) => (
                     <div key={s.id} className="flex items-start gap-3 border border-line border-l-2 border-l-brand bg-[#f7f9fa] px-3 py-2">
                       <div className="min-w-0 flex-1">
                         <div className="text-[0.8125rem] font-medium text-slate-800">{s.text}</div>
@@ -574,7 +575,10 @@ function PlanBuilder({ mode, plan, seed, onClose, onSaved }: { mode: "new" | "ed
                       </div>
                       {s.patch ? (
                         adopted.has(`${i}:${s.id}`) ? <Badge className="mt-0.5 bg-white text-emerald-700 ring-slate-300">{t("plans.sugg.adopted")}</Badge>
-                          : <Btn small disabled={i !== lastAssistant || busy} onClick={() => patchDraft({ patch: s.patch }, `${i}:${s.id}`)}>{t("plans.sugg.adopt")}</Btn>
+                          : <span className="flex shrink-0 items-center gap-1.5">
+                              <Btn small disabled={i !== lastAssistant || busy} onClick={() => patchDraft({ patch: s.patch }, `${i}:${s.id}`)}>{t("plans.sugg.adopt")}</Btn>
+                              <Btn small disabled={busy} onClick={() => { setDeclined((x) => new Set(x).add(`${i}:${s.id}`)); patchDraft({ dismiss: s }); }}>{t("plans.sugg.decline")}</Btn>
+                            </span>
                       ) : <Badge className="mt-0.5 bg-white text-slate-500 ring-slate-300">{t("plans.sugg.note")}</Badge>}
                     </div>
                   ))}
@@ -675,6 +679,7 @@ function PlanBuilder({ mode, plan, seed, onClose, onSaved }: { mode: "new" | "ed
                         <th className="w-[30%] px-2 py-1.5 font-medium">{t("plans.draft.col.check")}</th>
                         <th className="px-2 py-1.5 font-medium">{t("plans.draft.col.command")}</th>
                         <th className="w-[18%] px-2 py-1.5 font-medium">{t("plans.draft.col.scope")}</th>
+                        <th className="w-8 px-1 py-1.5" />
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-line">
@@ -686,6 +691,11 @@ function PlanBuilder({ mode, plan, seed, onClose, onSaved }: { mode: "new" | "ed
                           </td>
                           <td className="px-2 py-1.5 font-mono text-[0.71875rem] leading-snug break-words text-slate-700">{c.command}</td>
                           <td className="px-2 py-1.5 font-mono text-[0.71875rem] break-words text-slate-600">{c.devices ? c.devices.join(", ") : t("plans.draft.allDevices")}</td>
+                          <td className="px-1 py-1.5 text-center">
+                            <button type="button" title={t("plans.confirm.remove")} aria-label={t("plans.confirm.remove")} data-testid="draft-remove-check"
+                              onClick={() => patchDraft({ patch: { remove_checks: [c.id] } })}
+                              className="px-1 text-[0.9rem] leading-none text-slate-400 hover:text-bad">×</button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>

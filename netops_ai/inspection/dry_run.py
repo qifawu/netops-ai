@@ -57,12 +57,7 @@ def _run_one(adapter: Any, check: dict[str, Any], dev: str, hist: CL.MetricHisto
         return item
     for x in check.get("extract") or []:
         item["metrics"][x["name"]] = CL._extract(x, out)
-    for e in check.get("expect") or []:
-        if e.get("type") in CL.METRIC_EXPECT_TYPES:
-            r = CL.evaluate_metric_rule(e, item["metrics"].get(e["metric"]), dev, check["id"], hist)
-        else:
-            r = CL._evaluate(e, out)
-        item["evaluations"].append(r)
+    item["evaluations"] = CL.evaluate_expectations(check, out, item["metrics"], dev, hist)
     item["would_pass"] = not any(r.get("passed") is False for r in item["evaluations"])
     return item
 

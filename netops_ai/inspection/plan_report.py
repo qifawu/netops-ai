@@ -13,13 +13,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from netops_ai.inspection.checklist import METRIC_EXPECT_TYPES, _describe_metric_rule
+from netops_ai.inspection.checklist import DIFF_EXPECT_TYPES, METRIC_EXPECT_TYPES, STATEFUL_EXPECT_TYPES, _describe_metric_rule
 from netops_ai.inspection.export import Block, blocks_to_html, blocks_to_markdown
 
 STATUS_CN = {"pass": "通过", "fail": "未通过", "error": "出错", "denied": "被拒绝"}
 #: 指标规则这一次的状态（不判的几种要写清楚原因）
 RULE_STATE_CN = {"pass": "通过", "fail": "未通过", "baseline": "首次运行，已记录基线（不判）",
-                 "no_baseline": "之前没有采到这个指标，本次不判", "no_value": "本次没有采到这个指标，不判", "reset": "比上次小，按计数复位处理"}
+                 "no_baseline": "之前没有采到这个指标，本次不判", "no_value": "本次没有采到这个指标，不判", "reset": "比上次小，按计数复位处理",
+                 "partial": "一侧输出被截断，只判了看得全的那一侧", "truncated": "两次输出都被截断，不判"}
 EVIDENCE_CHARS = 2000
 
 
@@ -41,6 +42,8 @@ def _sched(s: dict[str, Any]) -> str:
 
 
 def _fmt_rule(e: dict[str, Any]) -> str:
+    if e.get("type") in DIFF_EXPECT_TYPES:
+        return f"与上次相比的明细（允许新增 {e.get('max_added', 0)} / 消失 {e.get('max_removed', 0)} 行）（{e.get('severity', 'warning')}）"
     if e.get("type") in METRIC_EXPECT_TYPES:
         # 运行结果里的规则已经带着描述（value）；计划定义里的规则没有，现拼一句
         desc = e.get("value") if "state" in e else _describe_metric_rule(e)
@@ -51,10 +54,28 @@ def _fmt_rule(e: dict[str, Any]) -> str:
 def _rule_outcome(e: dict[str, Any]) -> str:
     """一条指标规则这次的结果，写出比较的双方和来源运行。"""
     state = RULE_STATE_CN.get(e.get("state"), e.get("state") or "")
+    if e.get("type") in DIFF_EXPECT_TYPES:
+        return "明细对比：" + diff_summary(e)
     if e.get("reference") is not None:
         src = f"，对照运行 {e['reference_run_id']}" if e.get("reference_run_id") else "（固定值）"
         return f"{e.get('value')}：{state}，本次 {e.get('current')} / 对照 {e.get('reference')}{src}"
     return f"{e.get('value')}：{state}" + (f"，本次 {e.get('current')}" if e.get("current") is not None else "")
+
+
+def diff_summary(e: dict[str, Any]) -> str:
+    """明细对比一句话：「与上次相比 +1 / -0（对照运行 xxx）」或「首次，已记录基线」。"""
+    state = e.get("state")
+    if state == "baseline":
+        return f"首次，已记录基线（{e.get('current')} 行）"
+    if state in ("no_baseline", "truncated"):
+        return RULE_STATE_CN.get(state, state or "")
+    a = "?" if e.get("added") is None else e["added"]
+    r = "?" if e.get("removed") is None else e["removed"]
+    text = f"与上次相比 +{a} / -{r}（对照运行 {e.get('reference_run_id')}）：{RULE_STATE_CN.get(state, state or '')}"
+    trunc = e.get("truncated") or {}
+    if trunc.get("current") or trunc.get("reference"):
+        text += "；" + "、".join(n for n, k in (("本次输出", "current"), ("对照输出", "reference")) if trunc.get(k)) + "超过上限被截断，只比较了采到的部分"
+    return text
 
 
 def build_blocks(plan: dict[str, Any], runs: list[dict[str, Any]], trend: dict[str, Any] | None = None,
@@ -112,12 +133,25 @@ def build_blocks(plan: dict[str, Any], runs: list[dict[str, Any]], trend: dict[s
             continue
         for c in d.get("checks") or []:
             metrics = "，".join(f"{k}={v}" for k, v in (c.get("metrics") or {}).items()) or (c.get("detail") or "—")
-            rules = [_rule_outcome(e) for e in c.get("evaluations") or [] if e.get("type") in METRIC_EXPECT_TYPES]
+            rules = [_rule_outcome(e) for e in c.get("evaluations") or [] if e.get("type") in STATEFUL_EXPECT_TYPES]
             if rules:
                 metrics += "；" + "；".join(rules)
             rrows.append([d.get("name"), c.get("id"), STATUS_CN.get(c.get("status"), c.get("status")), metrics])
             evidence.append((d.get("name"), c))
     blocks.append(("table", ["设备", "检查项", "结果", "指标 / 说明"], rrows))
+    diff_rows = []
+    for d in last.get("devices") or []:
+        for c in d.get("checks") or []:
+            for e in c.get("evaluations") or []:
+                if e.get("type") in DIFF_EXPECT_TYPES and (e.get("added_sample") or e.get("removed_sample")):
+                    lines = [f"+ {x}" for x in e.get("added_sample") or []] + [f"- {x}" for x in e.get("removed_sample") or []]
+                    more = (e.get("added") or 0) + (e.get("removed") or 0) - len(lines)
+                    diff_rows.append((d.get("name"), c.get("id"), diff_summary(e), "\n".join(lines) + (f"\n……另有 {more} 行未列出" if more > 0 else "")))
+    if diff_rows:
+        blocks.append(("h3", "明细对比（与上一次成功采集相比，新增 + / 消失 -）"))
+        for dev, cid, summ, body in diff_rows:
+            blocks.append(("p", f"{dev} · {cid} · {summ}"))
+            blocks.append(("code", body))
     blocks.append(("h3", "设备输出原文（证据）"))
     for dev, c in evidence:
         out = (c.get("output") or "").strip("\r\n")  # 只去掉首尾的空行（设备回显前常有几行空白），正文一字不改
@@ -152,15 +186,18 @@ def build_blocks(plan: dict[str, Any], runs: list[dict[str, Any]], trend: dict[s
         for d in r.get("devices") or []:
             for c in d.get("checks") or []:
                 for e in c.get("evaluations") or []:
-                    if e.get("type") not in METRIC_EXPECT_TYPES:
+                    if e.get("type") not in STATEFUL_EXPECT_TYPES:
                         continue
                     key = (d.get("name"), c.get("id"), e.get("value") or e.get("type"))
                     cell = RULE_STATE_CN.get(e.get("state"), e.get("state") or "")
-                    if e.get("reference") is not None:
+                    if e.get("type") in DIFF_EXPECT_TYPES:
+                        if e.get("reference") is not None:
+                            cell += f"（+{'?' if e.get('added') is None else e['added']}/-{'?' if e.get('removed') is None else e['removed']}）"
+                    elif e.get("reference") is not None:
                         cell += f"（{e.get('reference')}→{e.get('current')}）"
                     rule_rows.setdefault(key, ["-"] * len(runs))[i] = cell
     if rule_rows:
-        blocks.append(("h3", "指标规则每次的结果"))
+        blocks.append(("h3", "有状态规则每次的结果（指标 / 明细对比）"))
         blocks.append(("table", ["设备", "检查项", "规则", f"结果（最近 {len(runs)} 次，旧→新）"],
                        [[dev, cid, rule, " → ".join(cells)] for (dev, cid, rule), cells in rule_rows.items()]))
 
@@ -174,7 +211,7 @@ def build_blocks(plan: dict[str, Any], runs: list[dict[str, Any]], trend: dict[s
             for c in d.get("checks") or []:
                 if c.get("status") == "pass":
                     continue
-                why = "；".join(_rule_outcome(e) if e.get("type") in METRIC_EXPECT_TYPES else _fmt_rule(e)
+                why = "；".join(_rule_outcome(e) if e.get("type") in STATEFUL_EXPECT_TYPES else _fmt_rule(e)
                                for e in c.get("evaluations") or [] if e.get("passed") is False) or (c.get("detail") or "")
                 frows.append([_t(r.get("started_at")), d.get("name"), c.get("id"), STATUS_CN.get(c.get("status"), c.get("status")), why])
     if frows:

@@ -14,7 +14,7 @@ import { FAULT_KEY, dayHead, dayKey, dayTime, hm } from "./incidentShared";
 /** 「告警与结论」页 = 左边历史告警（筛选 + 按天分组 + 同类折叠 + 分页），右边一次故障的详情（页签）
  *  或一台设备的排查历史。
  *
- *  以前左边每条堆两行结论 + 好几个徽标，右边六张卡片一路铺下去，挤。现在：
+ * 以前左边每条堆两行结论 + 好几个徽标，右边六张卡片一路铺下去，挤。现在（又收了一轮：列表两行、标签改纯文字、不再列总数）：
  *  - 列表一次故障一行，同一指纹（同设备同类故障）折成一行「同类 ×N」，点开才看每次；
  *  - 详情默认只给「结论」，证据 / 告警 / 调查步骤 / 假设清单 / 排查历史各自一个页签；
  *  - token、编号、指纹、系统标出的矛盾收进「更多信息」，矛盾条数在折叠标题上露出来，不藏。 */
@@ -77,6 +77,8 @@ const STATUS_KEY: Record<string, DictKey> = {
   已排除: "incidents.checklist.status.ruledOut",
   暂时无法判断: "incidents.checklist.status.cannotDetermine",
 };
+/** 置信度文字色，按 confLevel（0 未评级 / 1 低 / 2 中 / 3 高）取。 */
+const CONF_TEXT = ["text-slate-500", "text-rose-700", "text-amber-700", "text-emerald-700"];
 const CONF_KEY: Record<string, DictKey> = { high: "conf.high.long", medium: "conf.medium.long", low: "conf.low.long", none: "conf.none.label" };
 
 /** 设备与拓扑页「查看排查历史」跳过来时带 `#incidents?device=V1&view=history`。 */
@@ -86,7 +88,7 @@ function hashParams() {
 }
 
 const PAGE_SIZE = 30;
-const selCls = "h-7 min-w-0 rounded-[3px] border border-[#c3cad2] bg-white px-1.5 text-xs text-slate-700 focus:border-brand focus:outline-none";
+const selCls = "h-8 min-w-0 rounded-[8px] border border-line bg-white px-2 text-xs text-slate-700 hover:border-slate-400 focus:border-brand focus:outline-none";
 
 export default function Incidents() {
   const t = useT();
@@ -145,27 +147,23 @@ export default function Incidents() {
   }
 
   return (
-    <div className="flex items-start gap-4">
-      <div className="sticky top-[68px] flex max-h-[calc(100vh-84px)] w-[23rem] shrink-0 flex-col xl:w-[26rem] min-[1920px]:w-[32rem]">
-        <div className="mb-2 flex items-baseline justify-between px-1">
-          <span className="text-[0.8125rem] font-semibold tracking-wide text-slate-800">{t("hist.list.title")}</span>
-          <span className="num text-xs text-dim">{fill(t("hist.list.count"), { n: data!.total_incidents, rows: data!.total_rows })}</span>
-        </div>
-
-        {/* 筛选条：时间范围 + 需人工一行，设备 / 类型 / 置信度一行。 */}
-        <Card className="mb-2 space-y-2 px-2.5 py-2">
+    <div className="flex items-start gap-5">
+      <div className="sticky top-[80px] flex max-h-[calc(100vh-104px)] w-[23rem] shrink-0 flex-col xl:w-[26rem] min-[1920px]:w-[32rem]">
+        {/* 筛选条：时间范围 + 需人工一行，设备 / 类型 / 置信度一行。总数不再单列——总览里已经有了。 */}
+        <Card className="mb-3 space-y-2.5 p-3">
           <div className="flex items-center gap-2">
             <Seg<Range> value={f.range} onChange={(v) => set({ range: v })}
               items={[["24h", t("hist.range.24h")], ["7d", t("hist.range.7d")], ["30d", t("hist.range.30d")], ["all", t("hist.range.all")]]} />
             <span className="ml-auto flex items-center gap-1">
-              <label className="flex cursor-pointer items-center gap-1.5 text-xs whitespace-nowrap text-slate-700">
-                <input type="checkbox" checked={f.unresolved} onChange={(e) => set({ unresolved: e.target.checked })} className="h-3.5 w-3.5 accent-[#0f5c7a]" />
-                {t("hist.filter.unresolved")}<span className="num text-dim">{facets.needs_human}</span>
-              </label>
+              <button type="button" aria-pressed={f.unresolved} onClick={() => set({ unresolved: !f.unresolved })}
+                className={cn("flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs whitespace-nowrap transition",
+                  f.unresolved ? "border-rose-200 bg-rose-50 font-medium text-rose-700" : "border-line text-slate-700 hover:border-slate-400")}>
+                {t("hist.filter.unresolved")}<span className="num">{facets.needs_human}</span>
+              </button>
               <HelpTip text={t("hist.filter.unresolved.title")} />
             </span>
           </div>
-          <div className="grid grid-cols-[1fr_1fr_1fr_auto] items-center gap-1.5">
+          <div className="grid grid-cols-[1fr_1fr_1fr_auto] items-center gap-2">
             <select value={f.device} onChange={(e) => set({ device: e.target.value })} className={selCls} aria-label={t("hist.filter.device.all")}>
               <option value="">{t("hist.filter.device.all")}</option>
               {f.device && !facets.devices.some((d) => d.value === f.device) && <option value={f.device}>{f.device}</option>}
@@ -184,12 +182,12 @@ export default function Incidents() {
           </div>
         </Card>
 
-        <Card className="min-h-0 flex-1 overflow-y-auto">
+        <Card className="min-h-0 flex-1 overflow-y-auto pb-1">
           {rows.length === 0 ? <Empty title={t("hist.list.empty")} hint={t("hist.list.emptyHint")} /> : days.map((d) => (
             <div key={d.key}>
-              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-[#f6f7f9] px-3 py-[3px] text-[0.6875rem] font-semibold text-slate-600">
+              <div className="sticky top-0 z-10 flex items-center justify-between bg-white/95 px-4 pt-3 pb-1.5 text-xs font-medium text-slate-500 backdrop-blur">
                 <span className="num">{d.head}</span>
-                <span className="num font-normal text-dim">{d.rows.reduce((n, r) => n + r.count, 0)}</span>
+                <span className="num font-normal">{d.rows.reduce((n, r) => n + r.count, 0)}</span>
               </div>
               {d.rows.map((r) => (
                 <ListRow key={r.fingerprint} r={r} sel={sel} devView={!!devView} open={open.has(r.fingerprint)} onPick={pick} onToggle={() => toggle(r.fingerprint)} />
@@ -198,7 +196,7 @@ export default function Incidents() {
           ))}
           {data!.has_more && (
             <button type="button" disabled={busy} onClick={() => fetchPage(data!.page + 1, f)}
-              className="block w-full border-t border-line py-2 text-xs font-medium text-brand hover:bg-slate-50 disabled:text-dim">
+              className="mx-auto my-2 block h-8 w-[calc(100%-2rem)] rounded-[8px] border border-line text-xs font-medium text-slate-700 hover:border-slate-400 disabled:text-dim">
               {busy ? t("hist.list.loading") : fill(t("hist.list.loadMore"), { n: data!.total_rows - rows.length })}
             </button>
           )}
@@ -208,9 +206,9 @@ export default function Incidents() {
       <div className="min-w-0 flex-1">
         {devView ? (
           <Card className="overflow-hidden">
-            <div className="flex min-h-[44px] items-center gap-3 border-b border-line bg-[#f6f7f9] px-4 py-2">
+            <div className="flex min-h-[48px] items-center gap-3 border-b border-line px-5 py-2.5">
               <Icon d={PATH.clock} className="text-slate-500" />
-              <span className="font-mono text-[0.9375rem] font-semibold text-slate-800">{devView}</span>
+              <span className="text-[0.9375rem] font-semibold text-slate-900">{devView}</span>
               <span className="text-[0.8125rem] font-semibold text-slate-800">{t("hist.tab.history")}</span>
               <HelpTip text={t("hist.dev.note")} />
               {sel && <button type="button" onClick={() => pick(sel)} className="ml-auto shrink-0 text-xs font-medium text-brand hover:underline">{t("hist.dev.back")}</button>}
@@ -232,37 +230,35 @@ function ListRow({ r, sel, devView, open, onPick, onToggle }: { r: Row; sel: str
   const title = titleOf(b, 80);
   const inGroup = r.occurrences.some((o) => o.incident_id === sel);
   const on = !devView && (b.incident_id === sel || (inGroup && !open));
+  const meta: string[] = [t(FAULT_KEY[r.fault_type] ?? "faultType.other")];
+  if (b.alert_count > 1) meta.push(fill(t("incidents.mergedBadge"), { n: b.alert_count }));
   return (
-    <div className="border-b border-line last:border-b-0">
-      <div className={cn("relative flex items-center", on ? "bg-brand/[0.07]" : "hover:bg-slate-50")}>
-        {on && <span className="absolute inset-y-0 left-0 w-[3px] bg-brand" />}
+    <div>
+      <div className={cn("relative mx-2 rounded-[8px]", on ? "bg-brand/[0.07]" : "hover:bg-slate-50")}>
+        {on && <span className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-brand" />}
         <button type="button" onClick={() => onPick(b.incident_id)} title={title}
-          className="grid min-w-0 flex-1 grid-cols-[8px_36px_minmax(44px,auto)_auto_minmax(0,1fr)] items-center gap-x-2 py-[7px] pr-1 pl-3 text-left">
-          <span className={cn("h-2 w-2", c.dot)} title={`${t(c.longKey)}：${t(c.hintKey)}`} />
-          <span className="num text-xs text-dim">{hm(b.clock)}</span>
-          <span className="num max-w-[84px] truncate text-xs font-semibold text-slate-700">{r.devices.join("/") || b.host}</span>
-          <span className="rounded-[2px] px-1 text-[0.6875rem] leading-[16px] whitespace-nowrap text-slate-600 ring-1 ring-slate-300 ring-inset">{t(FAULT_KEY[r.fault_type] ?? "faultType.other")}</span>
-          <span className="min-w-0 truncate text-[0.8125rem] text-slate-800"><AiText text={title} lowPriority /></span>
-        </button>
-        <span className="flex shrink-0 items-center gap-1 pr-2">
-          {b.alert_count > 1 && (
-            <span className="num flex items-center gap-0.5 px-0.5 text-[0.6875rem] text-dim" title={MERGE_HINT(t, b.alert_count)}>
-              <svg viewBox="0 0 12 12" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.2"><path d="M2.5 4.5h6v5h-6zM4 2.5h6v5" /></svg>
-              {b.alert_count}
+          className="flex w-full min-w-0 gap-3 py-2.5 pr-3 pl-3.5 text-left">
+          <span className={cn("mt-[6px] h-2 w-2 shrink-0 rounded-full", c.dot)} title={`${t(c.longKey)}：${t(c.hintKey)}`} />
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="flex min-w-0 items-baseline gap-2 text-xs text-dim">
+              <span className="max-w-[9rem] shrink-0 truncate text-[0.8125rem] font-medium text-slate-900">{r.devices.join(" / ") || b.host}</span>
+              <span className="truncate">{meta.join(" · ")}</span>
+              <span className="num ml-auto shrink-0">{hm(b.clock)}</span>
             </span>
-          )}
-          {r.count > 1 && (
-            <button type="button" onClick={onToggle} title={fill(t("hist.row.sameTypeTitle"), { n: r.count })}
-              className={cn("num flex items-center gap-0.5 rounded-[2px] border px-1 text-[0.6875rem] leading-[16px] whitespace-nowrap",
-                open ? "border-brand bg-brand text-white" : "border-[#c3cad2] bg-white text-slate-700 hover:border-slate-400")}>
-              {fill(t("hist.row.sameType"), { n: r.count })}
-              <svg viewBox="0 0 12 12" className={cn("h-2.5 w-2.5 transition", open && "rotate-180")} fill="none" stroke="currentColor" strokeWidth="1.6"><path d="m3 4.5 3 3 3-3" /></svg>
-            </button>
-          )}
-        </span>
+            <span className={cn("truncate text-sm text-slate-800", r.count > 1 && "pr-16")}><AiText text={title} lowPriority /></span>
+          </span>
+        </button>
+        {r.count > 1 && (
+          <button type="button" onClick={onToggle} title={fill(t("hist.row.sameTypeTitle"), { n: r.count })} aria-expanded={open}
+            className={cn("num absolute right-2.5 bottom-2 flex items-center gap-0.5 rounded-full px-2 text-xs leading-5 whitespace-nowrap transition",
+              open ? "bg-brand text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}>
+            {fill(t("hist.row.sameType"), { n: r.count })}
+            <svg viewBox="0 0 12 12" className={cn("h-2.5 w-2.5 transition", open && "rotate-180")} fill="none" stroke="currentColor" strokeWidth="1.6"><path d="m3 4.5 3 3 3-3" /></svg>
+          </button>
+        )}
       </div>
       {open && (
-        <ol className="border-t border-line bg-[#f8f9fb] py-1">
+        <ol className="mx-2 mb-1 rounded-[8px] bg-slate-50 py-1">
           {r.occurrences.map((o) => {
             const oc = confMeta(o.confidence);
             const active = !devView && o.incident_id === sel;
@@ -271,10 +267,10 @@ function ListRow({ r, sel, devView, open, onPick, onToggle }: { r: Row; sel: str
                 <button type="button" onClick={() => onPick(o.incident_id)}
                   className={cn("relative grid w-full grid-cols-[10px_80px_8px_minmax(0,1fr)_auto] items-center gap-x-2 py-[5px] pr-3 pl-5 text-left text-xs",
                     active ? "bg-brand/[0.08]" : "hover:bg-white")}>
-                  {active && <span className="absolute inset-y-0 left-0 w-[3px] bg-brand" />}
+                  {active && <span className="absolute inset-y-1 left-0 w-[3px] rounded-full bg-brand" />}
                   <span className="h-full w-px justify-self-center bg-line" />
                   <span className="num text-dim">{dayTime(o.clock, lang)}</span>
-                  <span className={cn("h-2 w-2", oc.dot)} title={t(oc.longKey)} />
+                  <span className={cn("h-2 w-2 rounded-full", oc.dot)} title={t(oc.longKey)} />
                   <span className={cn("truncate", o.consistent === false ? "text-amber-700" : "text-slate-600")} title={t("hist.occ.consistentTitle")}>
                     {o.consistent === false ? t("hist.occ.inconsistent") : t("hist.occ.consistent")} · {t(oc.longKey)}
                   </span>
@@ -329,25 +325,26 @@ function Detail({ id, onPick, onDevice }: { id: string; onPick: (id: string) => 
   ];
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {/* 头：这是什么故障、在哪、AI 怎么看。只留一行标签 + 标题 + 一行元信息。 */}
-      <Card className="px-5 py-3.5">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge className="bg-white text-slate-700 ring-slate-300">{t(ft)}</Badge>
-          <Badge className={c.badge} title={t(c.hintKey)}><span className={cn("h-1.5 w-1.5", c.dot)} />{t(c.longKey)}</Badge>
-          {cur.needs_human && <span className="text-xs text-amber-700">{t("hist.detail.needsHuman")}</span>}
+      <Card className="px-6 py-5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.8125rem] text-dim">
+          <span title={t(c.hintKey)} className={cn("flex items-center gap-1.5 font-medium", CONF_TEXT[lvl])}>
+            <span className={cn("h-2 w-2 rounded-full", c.dot)} />{t(c.longKey)}{cur.needs_human && ` · ${t("hist.detail.needsHuman")}`}
+          </span>
+          <span>·</span><span>{t(ft)}</span>
           <span className="ml-auto flex items-center gap-2">
             <button type="button" onClick={() => setTab("history")}
-              className="rounded-[3px] border border-line px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50">{t("hist.detail.viewHistory")}</button>
+              className="h-8 rounded-[8px] border border-line px-3 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50">{t("hist.detail.viewHistory")}</button>
             <a href={`/api/records/${cur.alerts[0]?.eventid}/report.md`}
-              className="rounded-[3px] border border-line px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50">{t("incidents.exportReport")}</a>
+              className="flex h-8 items-center rounded-[8px] border border-line px-3 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50">{t("incidents.exportReport")}</a>
           </span>
         </div>
-        <h1 className="mt-2 text-[1.0625rem] leading-snug font-semibold text-slate-900"><AiText text={titleOf(cur, 90)} /></h1>
-        <div className="mt-1.5 flex flex-wrap gap-x-5 gap-y-1 text-xs text-dim">
-          <span>{t("incidents.meta.device")} <b className="num font-medium text-slate-800">{cur.host}</b></span>
-          <span>{t("incidents.meta.occurredAt")} <b className="num font-medium text-slate-800">{ts(cur.clock)}</b></span>
-          <span>{t("incidents.meta.elapsed")} <b className="num font-medium text-slate-800">{fmtDur(t, cur.elapsed_total)}</b></span>
+        <h1 className="mt-2 text-[1.25rem] leading-snug font-semibold text-slate-900"><AiText text={titleOf(cur, 90)} /></h1>
+        <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[0.8125rem] text-dim">
+          <span>{t("incidents.meta.device")} <b className="font-medium text-slate-900">{cur.host}</b></span>
+          <span>{t("incidents.meta.occurredAt")} <b className="num font-medium text-slate-900">{ts(cur.clock)}</b></span>
+          <span>{t("incidents.meta.elapsed")} <b className="num font-medium text-slate-900">{fmtDur(t, cur.elapsed_total)}</b></span>
           {cur.alert_count > 1 && <span title={MERGE_HINT(t, cur.alert_count)}>{fill(t("incidents.mergedBadge"), { n: cur.alert_count })}</span>}
           {(cur.repeat_count ?? 0) > 1 && <span title={REPEAT_HINT(t, cur.repeat_count!)}>{fill(t("incidents.repeatBadge"), { n: cur.repeat_count! })}</span>}
         </div>
@@ -355,14 +352,14 @@ function Detail({ id, onPick, onDevice }: { id: string; onPick: (id: string) => 
 
       <Card className="overflow-hidden">
         {/* 页签：窄屏横向滚动，不折行。数字角标只是数量，不上色。 */}
-        <div className="flex overflow-x-auto border-b border-line bg-[#f6f7f9]" role="tablist">
+        <div className="flex gap-6 overflow-x-auto border-b border-line px-6" role="tablist">
           {tabs.map(([k, label, n]) => (
             <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
-              className={cn("relative flex shrink-0 items-center gap-1.5 px-4 py-2.5 text-[0.8125rem] whitespace-nowrap transition",
-                tab === k ? "bg-white font-semibold text-slate-900" : "text-slate-600 hover:text-slate-900")}>
-              {tab === k && <span className="absolute inset-x-0 top-0 h-[2px] bg-brand" />}
+              className={cn("relative flex shrink-0 items-center gap-1.5 py-3 text-sm whitespace-nowrap transition",
+                tab === k ? "font-medium text-slate-900" : "text-slate-500 hover:text-slate-900")}>
+              {tab === k && <span className="absolute inset-x-0 bottom-0 h-[2px] rounded-full bg-brand" />}
               {t(label)}
-              {n != null && <span className={cn("num rounded-[2px] px-1 text-[0.6875rem] leading-4", tab === k ? "bg-slate-200 text-slate-700" : "bg-slate-200/70 text-slate-500")}>{n}</span>}
+              {n != null && <span className="num text-xs text-slate-400">{n}</span>}
             </button>
           ))}
         </div>
@@ -370,14 +367,14 @@ function Detail({ id, onPick, onDevice }: { id: string; onPick: (id: string) => 
         {tab === "conclusion" && (
           <div>
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
-              <div className="px-5 py-4">
-                <div className="mb-1.5 text-xs font-semibold text-slate-500">{t("incidents.rootCause.title")}</div>
+              <div className="px-6 py-5">
+                <h3 className="mb-2 text-sm font-semibold text-slate-900">{t("incidents.rootCause.title")}</h3>
                 <div className="text-sm leading-7 text-slate-700">
                   <AiInline text={full} />
                   {lang === "zh" && full !== cur.root_cause && <span className="text-slate-400">{cur.root_cause.slice(full.length)}</span>}
                 </div>
                 {(cur.related ?? []).length > 0 && (
-                  <div className="mt-3 rounded-[3px] border border-line border-l-2 border-l-brand bg-slate-50 px-3.5 py-2.5 text-[0.8125rem] leading-relaxed text-slate-800">
+                  <div className="mt-4 rounded-[10px] bg-slate-50 px-4 py-3 text-[0.8125rem] leading-relaxed text-slate-800">
                     <div className="mb-0.5 font-semibold">{t("incidents.related.title")}</div>
                     {cur.related.map((r) => (
                       <div key={r.eventid}><span data-mask="id">#{r.eventid}</span> {r.host}：{r.link}<span className="text-slate-500">（<AiInline text={r.reason} />）</span></div>
@@ -386,16 +383,16 @@ function Detail({ id, onPick, onDevice }: { id: string; onPick: (id: string) => 
                 )}
               </div>
               <div className="divide-y divide-line border-t border-line xl:border-t-0 xl:border-l">
-                <div className="px-5 py-4">
-                  <div className="flex items-center gap-1 text-xs font-semibold text-slate-500">{t("incidents.confidence.title")}<HelpTip text={t(c.hintKey)} /></div>
-                  <div className={cn("mt-1.5 text-[1.375rem] leading-none font-semibold", lvl === 3 ? "text-emerald-600" : lvl === 2 ? "text-amber-600" : lvl === 1 ? "text-rose-600" : "text-slate-400")}>{t(c.labelKey)}</div>
+                <div className="px-6 py-5">
+                  <h3 className="flex items-center gap-1 text-sm font-semibold text-slate-900">{t("incidents.confidence.title")}<HelpTip text={t(c.hintKey)} /></h3>
+                  <div className={cn("mt-2 text-[1.375rem] leading-none font-semibold", lvl === 3 ? "text-emerald-600" : lvl === 2 ? "text-amber-600" : lvl === 1 ? "text-rose-600" : "text-slate-400")}>{t(c.labelKey)}</div>
                   <div className="mt-2.5 flex gap-1.5">
-                    {[1, 2, 3].map((k) => <span key={k} className={cn("h-1.5 flex-1", k <= lvl ? c.bar : "bg-slate-200")} />)}
+                    {[1, 2, 3].map((k) => <span key={k} className={cn("h-1.5 flex-1 rounded-full", k <= lvl ? c.bar : "bg-slate-200")} />)}
                   </div>
                 </div>
                 {cur.next_step && (
-                  <div className="px-5 py-4">
-                    <div className="mb-1.5 text-xs font-semibold text-slate-500">{t("incidents.nextStep.title")}</div>
+                  <div className="px-6 py-5">
+                    <h3 className="mb-2 text-sm font-semibold text-slate-900">{t("incidents.nextStep.title")}</h3>
                     <div className="text-sm leading-relaxed text-slate-700"><AiInline text={cur.next_step} /></div>
                   </div>
                 )}
@@ -409,7 +406,7 @@ function Detail({ id, onPick, onDevice }: { id: string; onPick: (id: string) => 
           <ol className="divide-y divide-line">
             {cur.evidence.map((e, i) => (
               <li key={i} className="flex gap-3 px-5 py-3">
-                <span className="num mt-0.5 flex h-5 w-6 shrink-0 items-center justify-center rounded-[2px] border border-line bg-slate-50 text-[0.6875rem] font-semibold text-slate-600">{i + 1}</span>
+                <span className="num mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[0.6875rem] font-medium text-slate-600">{i + 1}</span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1 text-sm leading-relaxed text-slate-800"><AiInline text={e.claim} /></div>
@@ -456,7 +453,7 @@ function Detail({ id, onPick, onDevice }: { id: string; onPick: (id: string) => 
                 <button type="button" onClick={() => setOpenStep(openStep === i ? null : i)}
                   className="grid w-full grid-cols-[24px_8px_minmax(0,auto)_minmax(0,1fr)_auto_auto] items-center gap-x-2.5 px-5 py-2 text-left hover:bg-slate-50">
                   <span className="num text-xs text-dim">{i + 1}</span>
-                  <span className={cn("h-2 w-2", step.ok ? "bg-emerald-500" : "bg-rose-500")} title={step.ok ? "ok" : t("incidents.trace.failed")} />
+                  <span className={cn("h-2 w-2 rounded-full", step.ok ? "bg-emerald-500" : "bg-rose-500")} title={step.ok ? "ok" : t("incidents.trace.failed")} />
                   <span title={step.tool} className="truncate text-[0.8125rem] font-medium text-slate-800">{stepLabel(t, step)}</span>
                   <span className="truncate font-mono text-xs text-dim">
                     {typeof step.args === "object" ? Object.values(step.args ?? {}).flat().filter((x) => x !== "").join(" · ") : String(step.args)}
@@ -508,7 +505,7 @@ function Detail({ id, onPick, onDevice }: { id: string; onPick: (id: string) => 
             )}
             {cur.undistinguishable.length > 0 && (
               <div>
-                <div className="flex items-center gap-1 border-b border-line bg-[#f6f7f9] px-5 py-2 text-[0.8125rem] font-semibold text-slate-800">
+                <div className="flex items-center gap-1 border-b border-line px-6 py-3 text-sm font-semibold text-slate-900">
                   {t("incidents.undistinguishable.title")}<HelpTip text={t("incidents.undistinguishable.note")} />
                 </div>
                 <div className="divide-y divide-line">
@@ -532,7 +529,7 @@ function Detail({ id, onPick, onDevice }: { id: string; onPick: (id: string) => 
         {tab === "history" && (
           <div>
             <div className="flex items-center gap-2 border-b border-line px-4 py-2 text-xs text-dim">
-              <span className="font-mono font-semibold text-slate-800">{device}</span>
+              <span className="font-semibold text-slate-900">{device}</span>
               <HelpTip text={t("hist.dev.note")} />
               <button type="button" onClick={() => onDevice(device)} className="ml-auto shrink-0 font-medium text-brand hover:underline">{t("hist.dev.openWide")}</button>
             </div>

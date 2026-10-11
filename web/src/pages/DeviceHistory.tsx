@@ -135,11 +135,11 @@ export default function DeviceHistory({ device, currentId, onPick }: { device: s
 /** 分段按钮：网管控制台风，方角细边框，选中用主色。 */
 export function Seg<V extends string>({ value, onChange, items }: { value: V; onChange: (v: V) => void; items: [V, string][] }) {
   return (
-    <span className="inline-flex shrink-0 overflow-hidden rounded-[3px] border border-[#c3cad2] bg-white">
-      {items.map(([v, label], i) => (
-        <button key={v} type="button" onClick={() => onChange(v)}
-          className={cn("px-2 py-[3px] text-xs leading-4 whitespace-nowrap transition", i > 0 && "border-l border-[#c3cad2]",
-            value === v ? "bg-brand font-medium text-white" : "text-slate-600 hover:bg-slate-50")}>
+    <span role="group" className="inline-flex shrink-0 gap-0.5 rounded-[8px] bg-slate-100 p-[3px]">
+      {items.map(([v, label]) => (
+        <button key={v} type="button" onClick={() => onChange(v)} aria-pressed={value === v}
+          className={cn("rounded-[6px] px-2.5 py-1 text-xs leading-4 whitespace-nowrap transition",
+            value === v ? "bg-white font-medium text-slate-900 shadow-[0_1px_2px_rgb(0_0_0/0.08)]" : "text-slate-600 hover:text-slate-900")}>
           {label}
         </button>
       ))}

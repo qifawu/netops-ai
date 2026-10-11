@@ -124,6 +124,9 @@ def apply_selection(draft: dict[str, Any] | None, selection: dict[str, Any], top
         new = P.apply_patch(base, {"remove_devices": gone, "add_devices": wanted}, topology, lang)
         new["devices"] = sorted(new["devices"], key=_device_key(topology))
         _rescope_templates(new)
+        from netops_ai.inspection import plan_prefs as PF
+
+        PF.put(new, PF.record_picked(PF.get(base), devices=wanted))
         return new, [], devices_summary(new, lang)
     if kind == "schedule_picker":
         sched = P.normalize_schedule(value)
@@ -150,6 +153,9 @@ def apply_selection(draft: dict[str, Any] | None, selection: dict[str, Any], top
             else:
                 P.add_template_checks(new, tid, scope or [x["name"] for x in new["devices"]], topology, lang)
         titles = [P.TEMPLATES[t]["title"]["zh" if zh else "en"] for t in P.TEMPLATES if t in tids]
+        from netops_ai.inspection import plan_prefs as PF
+
+        new = PF.track_check_selection(base, new, tids)  # 取消勾选的记成「用户删掉的」，以后不再补回
         return new, [], (("已选择检查项：" if zh else "Checks: ") + ("、" if zh else ", ").join(titles))
     return base, [f"unknown selection type {kind!r}"], ""
 

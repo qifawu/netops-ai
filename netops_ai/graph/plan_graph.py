@@ -42,6 +42,7 @@ from langgraph.types import Command, interrupt
 from netops_ai.inspection import command_lookup as CMD
 from netops_ai.inspection import plan_chat as PC
 from netops_ai.inspection import plan_widgets as W
+from netops_ai.inspection import plan_prefs as PF
 from netops_ai.inspection import plans as P
 
 MAX_REPAIRS = PC.MAX_FIX_ROUNDS
@@ -194,7 +195,17 @@ def build_graph(*, llm_factory: Callable[[], Any] | None = None,
     # ------------------------------------------------------------------ 提案 / 校验
     def gather_context(state: PlanState) -> dict:
         """准备这一轮的上下文；判断要不要先去文档库找命令。拓扑信息只有名字 / 角色 / 邻居数，无地址无凭据。"""
-        return {"repairs": 0, "problems": [], "model_error": "", "lookup": CMD.wants_lookup(_last_user(state["messages"]))}
+        out: dict = {"repairs": 0, "problems": [], "model_error": "", "lookup": CMD.wants_lookup(_last_user(state["messages"]))}
+        # 把用户这句话读进草案的偏好（关注点 / 点名不要的 / 「我需要的是 X」的替换意图），后面的模型提示词、
+        # 草案评估、规则降级都读同一份——不读的话，「我需要路由明细」说完下一轮还是按角色默认塞 BGP / OSPF
+        text = _last_user(state["messages"])
+        if text and state.get("draft") is not None:
+            prefs, _ = PF.update_from_text(PF.get(state["draft"]), text)
+            out["draft"] = PF.put(dict(state["draft"]), prefs)
+        elif text:
+            prefs, _ = PF.update_from_text(PF.empty(), text)
+            out["draft"] = PF.put(P.empty_draft(), prefs)
+        return out
 
     def lookup_commands(state: PlanState) -> dict:
         """用户描述了想查什么却没给命令 / 说不记得命令：在文档库（命令目录 + docs_kb 索引）里找候选，逐条过白名单。"""

@@ -46,6 +46,27 @@ run that actually collected the metric — unreachable devices and refused comma
 First run → `baseline` (recorded, not judged); earlier runs without the metric → `no_baseline` (not judged);
 `reset_ok: true` treats a value lower than before as a counter reset, not a failure.
 
+Output detail comparison (line sets, e.g. the routing table entry by entry)::
+
+      - id: route_table
+        command: show ip route | begin Gateway
+        expect:
+          - type: output_diff_vs_previous
+            ignore_regex: ['is (variably )?subnetted']        # lines to drop before comparing
+            strip_regex: ['\\s\\d+:\\d{2}:\\d{2},']            # volatile parts to cut out of every line (route age, uptime)
+            continuation_regex: '^\\s+\\['                     # optional: lines that continue the previous entry (ECMP paths)
+            key_regex: '^.*?\\d+\\.\\d+\\.\\d+\\.\\d+/\\d+'    # optional: the part of the entry line a continuation inherits
+            max_added: 0                                      # allowed new lines (default 0)
+            max_removed: 0                                    # allowed missing lines (default 0)
+            severity: critical
+
+Compared with the most recent run that actually collected this check's output (pass or fail; unreachable devices,
+refused commands and errors are never a reference). The output is stored once per check (up to
+`DIFF_MAX_CHARS`, beyond that it is cut at a line boundary and marked truncated); the evaluation itself carries only
+the counts and the first `sample` (default 10) added / removed lines. If either side is truncated, only what both
+sides can see is judged: lines missing from a truncated current output are not counted as removed, lines new
+against a truncated reference are not counted as added.
+
 A plan (`netops_ai/inspection/plans.py`) is the same mapping plus `schedule` and `enabled`;
 the extra keys are ignored here.
 """
@@ -65,13 +86,19 @@ from netops_ai.devices.whitelist import SUPPORTED_VENDORS, check as whitelist_ch
 TEXT_EXPECT_TYPES = ("contains", "not_contains", "regex", "not_regex")
 #: 有状态的指标规则：看提取出来的数字，跟上一次 / 基线 / 固定阈值比
 METRIC_EXPECT_TYPES = ("metric_vs_previous", "metric_threshold", "metric_vs_baseline")
-EXPECT_TYPES = TEXT_EXPECT_TYPES + METRIC_EXPECT_TYPES
+#: 有状态的明细对比：整份输出按行集合跟上一次成功采到的输出比（新增 / 消失了哪些行）
+DIFF_EXPECT_TYPES = ("output_diff_vs_previous",)
+STATEFUL_EXPECT_TYPES = METRIC_EXPECT_TYPES + DIFF_EXPECT_TYPES
+EXPECT_TYPES = TEXT_EXPECT_TYPES + STATEFUL_EXPECT_TYPES
 DIRECTIONS = ("decrease", "increase", "change")
 THRESHOLD_OPS = (">", "<", ">=", "<=")
 #: 一条输出里提取多处数字时怎么合成一个值：first 第一处（默认）/ sum 求和 / max 最大 / count 命中次数
 EXTRACT_AGGS = ("first", "sum", "max", "count")
 SEVERITIES = ("info", "warning", "critical")
 MAX_OUTPUT_CHARS = 6000
+#: 明细对比的检查项单独留一份完整输出用来比（只存一份，不进每条判定），超过就按行截断并标记
+DIFF_MAX_CHARS = 200_000
+DIFF_SAMPLE = 10
 
 AdapterFactory = Callable[[Any], Any]
 
@@ -178,9 +205,45 @@ def _validate_metric_expect(where: str, e: dict[str, Any], metric_names: set[str
     return out
 
 
+def _regex_list(v: Any) -> list[str]:
+    if v is None:
+        return []
+    return [v] if isinstance(v, str) else list(v)
+
+
+def _validate_diff_expect(where: str, e: dict[str, Any]) -> list[str]:
+    out: list[str] = []
+    for k in ("ignore_regex", "strip_regex"):
+        v = e.get(k)
+        if v is None:
+            continue
+        if not (isinstance(v, str) or (isinstance(v, list) and all(isinstance(x, str) for x in v))):
+            out.append(f"{where}.{k}: a regex or a list of regexes")
+            continue
+        for rx in _regex_list(v):
+            try:
+                re.compile(rx)
+            except re.error as exc:
+                out.append(f"{where}.{k}: invalid regex {rx!r} ({exc})")
+    for k in ("continuation_regex", "key_regex"):
+        if k in e:
+            try:
+                re.compile(e[k] if isinstance(e[k], str) else "(")
+            except re.error as exc:
+                out.append(f"{where}.{k}: invalid regex ({exc})")
+    for k in ("max_added", "max_removed", "sample"):
+        if k in e and (not isinstance(e[k], int) or isinstance(e[k], bool) or e[k] < 0):
+            out.append(f"{where}.{k}: an integer >= 0")
+    if e.get("severity", "warning") not in SEVERITIES:
+        out.append(f"{where}.severity: one of {', '.join(SEVERITIES)}")
+    return out
+
+
 def _validate_expect(where: str, e: Any, metric_names: set[str] | None = None) -> list[str]:
     if not isinstance(e, dict):
         return [f"{where}: must be a mapping"]
+    if e.get("type") in DIFF_EXPECT_TYPES:
+        return _validate_diff_expect(where, e)
     if e.get("type") in METRIC_EXPECT_TYPES:
         return _validate_metric_expect(where, e, metric_names or set())
     out: list[str] = []
@@ -264,12 +327,17 @@ class MetricHistory:
     def __init__(self, runs: list[dict[str, Any]] | None = None) -> None:
         self.values: dict[tuple[str, str, str], list[tuple[str, str, float]]] = {}
         self.attempted: set[tuple[str, str]] = set()
+        #: 明细对比用：每个（设备, 检查项）最近一次成功采到的完整输出 (时间, run id, 输出, 是否截断)
+        self.snapshots: dict[tuple[str, str], tuple[str, str, str, bool]] = {}
         for r in sorted(runs or [], key=lambda r: r.get("started_at", "")):
             for d in r.get("devices") or []:
                 for c in d.get("checks") or []:
                     self.attempted.add((d.get("name"), c.get("id")))
                     if c.get("status") not in ("pass", "fail"):
                         continue
+                    if isinstance(c.get("diff_output"), str):
+                        self.snapshots[(d.get("name"), c.get("id"))] = (r.get("started_at", ""), r.get("run_id", ""),
+                                                                        c["diff_output"], bool(c.get("diff_truncated")))
                     for m, v in (c.get("metrics") or {}).items():
                         if _is_num(v):
                             self.values.setdefault((d.get("name"), c.get("id"), m), []).append((r.get("started_at", ""), r.get("run_id", ""), v))
@@ -284,6 +352,106 @@ class MetricHistory:
 
     def ever_attempted(self, dev: str, cid: str) -> bool:
         return (dev, cid) in self.attempted
+
+    def snapshot(self, dev: str, cid: str) -> tuple[str, str, str, bool] | None:
+        return self.snapshots.get((dev, cid))
+
+
+def cap_diff_output(output: str) -> tuple[str, bool]:
+    """明细对比要存的那份输出：不超过 DIFF_MAX_CHARS；超了就在行边界截断（不留半行），返回 (文本, 是否截断)。"""
+    if len(output) <= DIFF_MAX_CHARS:
+        return output, False
+    cut = output[:DIFF_MAX_CHARS]
+    nl = cut.rfind("\n")
+    return (cut[:nl] if nl > 0 else ""), True
+
+
+def normalize_lines(output: str, e: dict[str, Any]) -> set[str]:
+    """把输出变成用来比较的行集合：去掉忽略行、剪掉易变字段（路由老化时间等）、折叠空白；
+    续行（如等价多路径的第二条下一跳）带上它所属条目的前缀，各自成一行，丢了一条路径也能看出来。"""
+    ignore = [re.compile(x) for x in _regex_list(e.get("ignore_regex"))]
+    strip = [re.compile(x) for x in _regex_list(e.get("strip_regex"))]
+    cont = re.compile(e["continuation_regex"]) if e.get("continuation_regex") else None
+    key = re.compile(e["key_regex"]) if e.get("key_regex") else None
+    lines: set[str] = set()
+    parent = ""
+    for raw in output.splitlines():
+        if not raw.strip() or any(rx.search(raw) for rx in ignore):
+            continue
+        is_cont = bool(cont and cont.search(raw))
+        text = raw
+        for rx in strip:
+            text = rx.sub("", text)
+        text = " ".join(text.split())
+        if not text:
+            continue
+        if is_cont and parent:
+            text = f"{parent} {text}"
+        else:
+            m = key.search(text) if key else None
+            parent = m.group(0) if m else text
+        lines.add(text)
+    return lines
+
+
+def _describe_diff_rule(e: dict[str, Any]) -> str:
+    return f"output lines vs previous run (allowed +{e.get('max_added', 0)} / -{e.get('max_removed', 0)})"
+
+
+def evaluate_diff_rule(e: dict[str, Any], output: str, truncated: bool, dev: str, cid: str, hist: MetricHistory) -> dict[str, Any]:
+    """明细对比一条规则的结果。只带计数和前 `sample` 条样例，不带整表。`passed` 为 None 表示这次不判。"""
+    sample = int(e.get("sample", DIFF_SAMPLE))
+    cur = normalize_lines(output, e)
+    out: dict[str, Any] = {"type": e["type"], "severity": e.get("severity", "warning"), "value": _describe_diff_rule(e),
+                           "current": len(cur), "reference": None, "reference_run_id": None, "reference_at": None,
+                           "reference_source": None, "added": None, "removed": None, "added_sample": [], "removed_sample": [],
+                           "truncated": {"current": truncated, "reference": False}}
+    ref = hist.snapshot(dev, cid)
+    if ref is None:
+        if hist.ever_attempted(dev, cid):
+            return {**out, "passed": None, "state": "no_baseline",
+                    "detail": "earlier runs did not collect this output (unreachable, refused or error); recorded now, not judged"}
+        return {**out, "passed": None, "state": "baseline", "detail": f"first run: {len(cur)} lines recorded as the baseline, not judged"}
+    at, run_id, ref_text, ref_trunc = ref
+    old = normalize_lines(ref_text, e)
+    added = sorted(cur - old)
+    removed = sorted(old - cur)
+    out.update(reference=len(old), reference_run_id=run_id, reference_at=at, reference_source="run",
+               truncated={"current": truncated, "reference": ref_trunc})
+    # 截断的一边看不全：当前输出截断 → 「消失」可能只是没采到，不算；参考输出截断 → 「新增」可能只是上次没采到，不算
+    judge_removed, judge_added = not truncated, not ref_trunc
+    out.update(added=len(added) if judge_added else None, removed=len(removed) if judge_removed else None,
+               added_sample=added[:sample] if judge_added else [], removed_sample=removed[:sample] if judge_removed else [])
+    if not judge_added and not judge_removed:
+        return {**out, "passed": None, "state": "truncated", "detail": "both outputs were truncated; not judged"}
+    bad = []
+    if judge_added and len(added) > int(e.get("max_added", 0)):
+        bad.append(f"+{len(added)} > {e.get('max_added', 0)}")
+    if judge_removed and len(removed) > int(e.get("max_removed", 0)):
+        bad.append(f"-{len(removed)} > {e.get('max_removed', 0)}")
+    parts = [f"+{len(added)}" if judge_added else "+? (reference truncated)", f"-{len(removed)}" if judge_removed else "-? (current truncated)"]
+    detail = f"{' / '.join(parts)} vs run {run_id}" + (f": over the limit ({', '.join(bad)})" if bad else "")
+    state = "fail" if bad else ("pass" if (judge_added and judge_removed) else "partial")
+    return {**out, "passed": not bad, "state": state, "detail": detail}
+
+
+def evaluate_expectations(check: dict[str, Any], output: str, metrics: dict[str, Any], dev: str,
+                          hist: MetricHistory) -> list[dict[str, Any]]:
+    """一条检查项的全部判定（正式运行和试运行共用）。明细对比只看存得下的那部分（cap_diff_output）。"""
+    evals = []
+    diff_text, diff_trunc = cap_diff_output(output)
+    for e in check.get("expect") or []:
+        if e.get("type") in DIFF_EXPECT_TYPES:
+            evals.append(evaluate_diff_rule(e, diff_text, diff_trunc, dev, check["id"], hist))
+        elif e.get("type") in METRIC_EXPECT_TYPES:
+            evals.append(evaluate_metric_rule(e, metrics.get(e["metric"]), dev, check["id"], hist))
+        else:
+            evals.append(_evaluate(e, output))
+    return evals
+
+
+def has_diff_rule(check: dict[str, Any]) -> bool:
+    return any(isinstance(e, dict) and e.get("type") in DIFF_EXPECT_TYPES for e in check.get("expect") or [])
 
 
 def _describe_metric_rule(e: dict[str, Any]) -> str:
@@ -350,11 +518,10 @@ def _run_check(adapter: Any, check: dict[str, Any], dev_name: str = "", hist: Me
         item["output_truncated"] = True
     for x in check.get("extract") or []:
         item["metrics"][x["name"]] = _extract(x, output)
-    for e in check.get("expect") or []:
-        if e.get("type") in METRIC_EXPECT_TYPES:
-            item["evaluations"].append(evaluate_metric_rule(e, item["metrics"].get(e["metric"]), dev_name, check["id"], hist or MetricHistory()))
-        else:
-            item["evaluations"].append(_evaluate(e, output))
+    if has_diff_rule(check):
+        # 下次对比的参考：只存这一份（不进每条判定）；不可达 / 被拒 / 出错的运行走不到这里，不会覆盖基线
+        item["diff_output"], item["diff_truncated"] = cap_diff_output(output)
+    item["evaluations"] = evaluate_expectations(check, output, item["metrics"], dev_name, hist or MetricHistory())
     failed = [e for e in item["evaluations"] if e["passed"] is False]  # None = 这次不判（首次基线等）
     item["status"] = "fail" if failed else "pass"
     if failed:
@@ -441,6 +608,7 @@ Rules:
 - A counter that only grows is a trend only if it grows faster than before or the growth continues across at least 3 runs; a single jump is a spike, not a trend. A counter that drops to a lower value means the device or interface was reset, not that it improved.
 - Say which findings need action soon, which can wait, and which you cannot judge. For anything you cannot judge, name the data or the read-only command that would settle it.
 - Lines marked "rule" are stateful metric rules (compared with the previous run, a baseline or a threshold): "baseline" means the first run that recorded the value, "no_baseline" that earlier runs did not collect it, "reset" a counter that dropped and was treated as reset — none of these is a failure.
+- Lines "rule output diff" compare the whole output line by line with the previous run: "+N/-M" lines appeared / disappeared, with up to three sample lines (for a routing table each line is a route or a path). "truncated" or "?" means part of the output was not collected, so that side was not judged. A change that appears and is reversed in the next run is a flap, not a trend.
 - Never suggest a configuration change as something you have done. Suggestions are for a human to decide.
 Answer concisely in the language the operator used for the checklist notes (default: the language of this prompt), as a short list: device, check, classification, evidence (run ids and values), recommendation."""
 
@@ -495,7 +663,15 @@ def trend_table(history: list[dict[str, Any]]) -> str:
                     if c["id"] != cid:
                         continue
                     for e in c.get("evaluations") or []:
-                        if e.get("type") in METRIC_EXPECT_TYPES:
+                        if e.get("type") in DIFF_EXPECT_TYPES:
+                            if e.get("state") in ("pass", "fail", "partial"):
+                                a = "?" if e.get("added") is None else e["added"]
+                                rm = "?" if e.get("removed") is None else e["removed"]
+                                samples = "; ".join([f"+{s}" for s in (e.get("added_sample") or [])[:3]] + [f"-{s}" for s in (e.get("removed_sample") or [])[:3]])
+                                got["output diff"] = f"{e['state']}(+{a}/-{rm}" + (f": {samples}" if samples else "") + ")"
+                            else:
+                                got["output diff"] = str(e.get("state"))
+                        elif e.get("type") in METRIC_EXPECT_TYPES:
                             ref = "" if e.get("reference") is None else f"({e['reference']}→{e.get('current')})"
                             got[e.get("value", e["type"])] = f"{e.get('state')}{ref}"
             for k in got:

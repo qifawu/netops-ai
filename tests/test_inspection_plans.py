@@ -473,12 +473,14 @@ class TestIntentLookupConfirm(TestGraph):
         # 真实走查里撞到的：用户刚采纳了 CPU 检查，下一轮模型重写草案时把它丢了
         conv = self._conv([_out(), _out()])
         r = conv.chat("k1", [{"role": "user", "content": "x"}], None, "zh")
-        d = P.apply_patch(r["draft"], {"add_checks": [{"template": "cpu", "devices": None}]}, self.topo)
+        from netops_ai.inspection import plan_prefs as PF
+
+        d = PF.apply_patch_tracked(r["draft"], {"add_checks": [{"template": "cpu", "devices": None}]}, self.topo)  # 网页「采纳」走的路径
         r = conv.chat("k1", [{"role": "user", "content": "x"}, {"role": "user", "content": "周期就每小时，不用改"}], d, "zh")
         self.assertIn("cpu", [c["id"] for c in r["draft"]["checks"]])
         conv = self._conv([_out(), _out()])
         r = conv.chat("k2", [{"role": "user", "content": "x"}], None, "zh")
-        d = P.apply_patch(r["draft"], {"add_checks": [{"template": "cpu", "devices": None}]}, self.topo)
+        d = PF.apply_patch_tracked(r["draft"], {"add_checks": [{"template": "cpu", "devices": None}]}, self.topo)
         r = conv.chat("k2", [{"role": "user", "content": "x"}, {"role": "user", "content": "去掉 CPU"}], d, "zh")
         self.assertNotIn("cpu", [c["id"] for c in r["draft"]["checks"]])
 

@@ -61,6 +61,8 @@ class PlanDraftRequest(BaseModel):
     patch: dict[str, Any] | None = None
     #: 页面上还挂着的建议（带 patch），返回其中哪些仍然有用
     suggestions: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+    #: 用户点了「不需要」的那条建议（带 patch / id）：记进草案偏好，之后等价的建议不再出现
+    dismiss: dict[str, Any] | None = None
     lang: Literal["zh", "en"] = "zh"
 
 
@@ -156,8 +158,10 @@ def api_plan_draft(body: PlanDraftRequest) -> JSONResponse:
     from netops_ai.inspection.plan_chat import live_suggestions, merge_suggestions
 
     try:
+        from netops_ai.inspection import plan_prefs as PF
+
         topo = _topology()
-        draft = P.apply_patch(body.draft, body.patch, topo, body.lang)
+        draft = PF.apply_patch_tracked(body.draft, body.patch, topo, body.lang, dismiss_suggestion=body.dismiss)
     except P.PlanError as exc:
         return _err(exc)
     clean, removed = P.sanitize(draft)

@@ -5,14 +5,14 @@ import { cn } from "./api";
  *  字号层级：页面主标题 20 / 卡片标题 15 / 正文 14 / 辅助说明 12。 */
 
 export function Card({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("rounded-[4px] border border-line bg-card", className)}>{children}</div>;
+  return <div className={cn("rounded-[10px] border border-line bg-card", className)}>{children}</div>;
 }
 
 export function CardHead({ title, note, right, icon }: { title: string; note?: string; right?: ReactNode; icon?: ReactNode }) {
   return (
-    <div className="flex min-h-[40px] items-center gap-2 border-b border-line bg-[#f6f7f9] px-4 py-2">
+    <div className="flex min-h-[48px] items-center gap-2 border-b border-line px-5 py-2.5">
       {icon && <span className="flex shrink-0 text-slate-500 [&>svg]:!text-slate-500">{icon}</span>}
-      <span className="text-[0.8125rem] font-semibold tracking-wide text-slate-800">{title}</span>
+      <span className="text-[0.9375rem] font-semibold text-slate-900">{title}</span>
       {note && <span className="text-xs text-dim">{note}</span>}
       {right && <span className="ml-auto">{right}</span>}
     </div>
@@ -21,7 +21,7 @@ export function CardHead({ title, note, right, icon }: { title: string; note?: s
 
 export function Badge({ children, className, title }: { children: ReactNode; className?: string; title?: string }) {
   return (
-    <span title={title} className={cn("inline-flex shrink-0 items-center gap-1 rounded-[2px] px-1.5 py-px text-[0.6875rem] leading-[16px] font-medium whitespace-nowrap ring-1 ring-inset", className)}>
+    <span title={title} className={cn("inline-flex shrink-0 items-center gap-1 rounded-[6px] px-2 py-px text-xs leading-[18px] font-medium whitespace-nowrap ring-1 ring-inset", className)}>
       {children}
     </span>
   );
@@ -31,7 +31,7 @@ export function SectionTitle({ title, note, right }: { title: string; note?: str
   return (
     <div className="mb-3 flex items-end gap-3">
       <div>
-        <h2 className="text-[0.8125rem] font-semibold tracking-wide text-slate-800">{title}</h2>
+        <h2 className="text-[0.9375rem] font-semibold text-slate-900">{title}</h2>
         {note && <p className="mt-0.5 text-xs text-dim">{note}</p>}
       </div>
       {right && <div className="ml-auto">{right}</div>}
@@ -54,9 +54,9 @@ export function Empty({ title, hint }: { title: string; hint?: string }) {
 export function Loading() {
   return (
     <div className="space-y-3">
-      <div className="h-24 animate-pulse rounded-[4px] bg-slate-200/70" />
+      <div className="h-24 animate-pulse rounded-[10px] bg-slate-200/70" />
       <div className="grid grid-cols-4 gap-3">
-        {[0, 1, 2, 3].map((k) => <div key={k} className="h-24 animate-pulse rounded-[4px] bg-slate-200/70" />)}
+        {[0, 1, 2, 3].map((k) => <div key={k} className="h-24 animate-pulse rounded-[10px] bg-slate-200/70" />)}
       </div>
     </div>
   );

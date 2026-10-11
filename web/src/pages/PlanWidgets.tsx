@@ -158,6 +158,10 @@ export function CheckPicker({ w, onSubmit }: { w: Widget; onSubmit: (s: Selectio
   return (
     <Frame title={t("plans.widget.checks.title")} testid="widget-checks">
       <form onSubmit={submit} className="px-3 py-2">
+        <div className="mb-1 flex flex-wrap gap-1.5 border-b border-line pb-2" data-testid="check-shortcuts">
+          <Btn small type="button" onClick={() => setSel(new Set())}>{t("plans.widget.none")}</Btn>
+          {rec.size > 0 && <Btn small type="button" onClick={() => setSel(new Set(items.map((i) => i.id).filter((id) => rec.has(id))))}>{t("plans.widget.onlyRecommended")}</Btn>}
+        </div>
         <div className="divide-y divide-line">
           {items.map((it) => (
             <div key={it.id} className="py-1.5">

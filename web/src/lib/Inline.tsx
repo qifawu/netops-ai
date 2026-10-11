@@ -16,7 +16,7 @@ export default function Inline({ text }: { text: string }) {
     out.push(
       m[1] != null
         ? <strong key={m.index} className="font-semibold">{m[1]}</strong>
-        : <code key={m.index} className="rounded bg-black/5 px-1 py-0.5 font-mono text-[0.9em]">{m[2]}</code>,
+        : <code key={m.index} className="rounded-[4px] bg-slate-100 px-1 py-px text-slate-800 [font-family:inherit]">{m[2]}</code>,
     );
     last = m.index! + m[0].length;
   }

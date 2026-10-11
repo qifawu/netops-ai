@@ -20,6 +20,7 @@ import json
 import re
 from typing import Any
 
+from netops_ai.inspection import plan_prefs as PF
 from netops_ai.inspection import plans as P
 from netops_ai.inspection.checklist import EXPECT_TYPES, EXTRACT_AGGS, SEVERITIES
 
@@ -114,15 +115,18 @@ Rules for the draft:
 - checks: prefer templates — set `template` to a template id and leave id/title/command/expect/extract empty. Write a custom check (template "") only when no template fits: one full read-only `show ...` command (no abbreviations, no placeholders), preferably from `command_catalog`, expect/extract regexes that match real Cisco IOS output. Never propose configuration, clear, reload, debug, copy or any command that changes the device: a whitelist rejects them and they never reach the device.
 - A check's `devices` = [] means every plan device; otherwise list the subset (e.g. BGP only on core).
 - "Alert when the number of routes drops compared with last time" (or similar "fewer than the previous run") → use the `route_count` template: it counts the routing table entries and compares each run with the previous one (the first run records a baseline).
+- "Which routes changed / routing table details compared with last time / route table diff" → use the `route_table_diff` template: it compares the whole routing table line by line with the previous run and lists the routes that appeared or disappeared. A request for the routing table is NOT a request for OSPF neighbors or BGP sessions; do not add those unless the user names them.
 - schedule: `every_minutes` (integer) or `daily_at` "HH:MM" (server local time); set the unused one to 0 / "". If the user has not said, set both to 0 / "" and ask.
 - ready = true only when devices, checks and schedule are all decided and nothing important is still open.
 - enabled: true, unless the user asked to pause the plan (then false).
 - If `editing_plan` is set, the user is adjusting that existing plan: keep its plan_name, start from `current_draft` and change only what the user asks (add/remove checks or commands, other devices, schedule, pause).
+- `user_prefs.removed_checks`: the user deleted these checks. Never put them back (not in the draft, not in suggestions, not in quick_replies) unless the user's latest message explicitly asks for them again.
+- `user_prefs.focus` / `focus_topics`: what the user said they care about. Build the draft around it; do not add role-based defaults the user did not ask for.
 - If `command_candidates` is present, those commands were found in the documentation library / command catalog for what the user described. Do NOT add them to the draft yourself: the user picks them from a list shown under your reply. Say in one sentence that candidates are listed below; never present them as device evidence.
 
-Suggestions (be proactive, 0-3 per turn, never repeat one that is already in the draft): each is one concrete change with a one-sentence reason, expressed as a patch (add_devices, add_checks with template ids, every_minutes / daily_at; unused fields empty / 0). Good advice looks like: core devices → OSPF neighbor and BGP checks; counter checks no more often than every 5 minutes, or the trend is just noise; a trend needs at least 3 runs; access switches → watch uplink error counters.
+Suggestions (0-3 per turn; at most 2 once the user has stated a focus): each is one concrete change with a one-sentence reason, expressed as a patch (add_devices, add_checks with template ids, every_minutes / daily_at; unused fields empty / 0). Never repeat one already in the draft, one in `user_prefs.dismissed` (the user clicked "not needed"), or one that adds a removed check. Once the user has stated a focus, suggest only things that serve that focus or close a real risk in the current draft (e.g. counter checks more often than every 5 minutes give only noise) — no generic per-role checklists. Without a focus, role-based ideas are fine.
 
-quick_replies: 0-3 short answers the user is likely to click, in {language}.
+quick_replies: 0-3 short answers the user is likely to click next, in {language}, derived from the user's focus and what the draft still lacks — never a check the user removed or dismissed.
 
 Context (JSON):
 {context}"""
@@ -216,6 +220,10 @@ def build_messages(messages: list[dict[str, str]], draft: dict[str, Any] | None,
     }
     if editing:
         context["editing_plan"] = editing
+    prefs = PF.get(draft)
+    context["user_prefs"] = {"focus": prefs["focus"], "focus_topics": prefs["focus_topics"],
+                             "removed_checks": [r.get("template") or r.get("command") or r.get("id") for r in prefs["removed"]],
+                             "dismissed": prefs["dismissed"]}
     if candidates:
         context["command_candidates"] = [{"command": c["command"], "purpose": c.get("purpose", ""), "usable": c.get("allowed", False)}
                                          for c in candidates]
@@ -345,7 +353,8 @@ def merge_suggestions(model_items: list[dict[str, Any]], draft: dict[str, Any], 
             seen_effect.add(effect)
         seen_ids.add(s["id"])
         out.append(s)
-    return out[:MAX_SUGGESTIONS]
+    # 用户点过「不需要」的（含等价的）、要加回删掉的检查的、说了关注点后跟它无关的，都不出；有关注点时最多 2 条
+    return PF.filter_suggestions(out, PF.get(draft), MAX_SUGGESTIONS)
 
 
 def live_suggestions(items: list[dict[str, Any]], draft: dict[str, Any], topology: dict[str, Any], lang: str) -> list[str]:
@@ -377,11 +386,11 @@ def opening(topology: dict[str, Any], draft: dict[str, Any] | None, lang: str) -
     if zh:
         reply = (f"你好，我来帮你制定一个只读巡检计划。拓扑里有 {len(topology)} 台设备：" + "，".join(parts) + "。"
                  "\n可以先在下面勾选设备范围，也可以直接说说最担心哪类问题，我会给出推荐的检查项和周期。")
-        quick = ["核心设备的邻居和路由", "接口错误增长", "CPU 和内存"]
+        quick = ["路由表有没有变化", "接口错误增长", "CPU 和内存"]
     else:
         reply = (f"Hi — let's set up a read-only inspection plan. The topology has {len(topology)} devices: " + ", ".join(parts) + "."
                  "\nPick the devices below, or just tell me what worries you most and I'll propose checks and a schedule.")
-        quick = ["Neighbors and routing on the core", "Growing interface errors", "CPU and memory"]
+        quick = ["Routing table changes", "Growing interface errors", "CPU and memory"]
     d = draft if draft and (draft.get("devices") or draft.get("checks")) else P.empty_draft()  # 预置了检查项（以基础巡检为起点）的草案也留着
     d.setdefault("name", "")
     if not d["name"]:
@@ -397,13 +406,15 @@ def opening(topology: dict[str, Any], draft: dict[str, Any] | None, lang: str) -
 
 _ROLE_WORDS = {"core": r"核心|core", "aggregation": r"汇聚|aggregation|distribution", "access": r"接入|access"}
 _TEMPLATE_WORDS = {
-    "ospf_neighbors": r"ospf|邻居|neighbou?r|路由|routing",
-    "bgp_sessions": r"bgp|路由|routing",
+    # 「路由」「routing」不再指向 OSPF / BGP：问路由表的人要的是路由表（route_count / route_table_diff）
+    "ospf_neighbors": r"ospf|邻居|neighbou?r",
+    "bgp_sessions": r"bgp",
     "interface_errors": r"错误|error|crc|丢包",
     "uplink_errors": r"上联|uplink",
     "interfaces": r"接口状态|接口\s*up|接口\s*down|interface status|link down|端口",
     "cpu": r"cpu",
-    "route_count": r"路由条目|路由表|路由数|route count|routing table|route entries|number of routes",
+    "route_count": r"路由条目|路由表.{0,12}(?:条目|条数|总数|数量)|路由数|route count|route entries|number of routes",
+    "route_table_diff": r"路由表?.{0,12}(?:明细|对比|比对|差异|逐条|变化|增减)|哪些路由|routing table (?:diff|changes|details)|route changes|which routes",
     "memory": r"内存|memory",
 }
 
@@ -435,14 +446,23 @@ def rule_turn(messages: list[dict[str, str]], draft: dict[str, Any] | None, topo
     low = text.lower()
     roles = [r for r, rx in _ROLE_WORDS.items() if re.search(rx, low)]
     names = [d.name for d in topology.values() if re.search(rf"(?<![A-Za-z0-9]){re.escape(d.name.lower())}(?![A-Za-z0-9])", low)]
+    prefs = PF.get(draft)
     templates = [tid for tid, rx in _TEMPLATE_WORDS.items() if re.search(rx, low)]
+    # 说过关注点就只用关注点相关的模板，不再按角色默认补 OSPF / BGP 那一套
+    if PF.has_focus(prefs):
+        templates = list(dict.fromkeys([*PF.related_templates(prefs), *[t for t in templates if t in PF.read_text(text)["wanted"]]]))
     sched = parse_schedule_text(text)
     base = draft if draft and draft.get("devices") else None
+    if base is not None and PF.read_text(text)["exclusive"]:
+        # 「我需要的是 X」「只要 X」：模板检查里跟 X 无关的是被替换掉的（用户自己加的命令留着）
+        related = set(PF.related_templates(prefs))
+        base = {**base, "checks": [c for c in base.get("checks") or [] if not c.get("template") or c["template"] in related]}
     if base is None and not roles and not names:
         roles = ["core", "aggregation"]
     new_dev = bool(roles or names)
     d = P.recommended_draft(topology, roles, devices=names, templates=templates or (None if base is None or new_dev else []),
                             schedule=sched, lang=lang, base=base)
+    d, _ = PF.enforce(d, PF.clear_picked(prefs))
     clean, removed = P.sanitize(d)
     v = P.check_draft(clean)
     sched_txt = _schedule_text(clean.get("schedule") or {}, zh)
@@ -454,7 +474,7 @@ def rule_turn(messages: list[dict[str, str]], draft: dict[str, Any] | None, topo
                  f"{len(clean['checks'])} checks, {sched_txt}. Adjust the schedule on the right, then click \"Confirm and enable\".")
     return {"reply": reply, "draft": clean, "validation": v, "ready": v["ok"], "source": "rules", "fix_rounds": 0,
             "suggestions": merge_suggestions([], clean, topology, lang),
-            "quick_replies": (["加上接入层", "改成每 15 分钟", "只看核心"] if zh else ["Add the access layer", "Every 15 minutes", "Core only"]),
+            "quick_replies": PF.quick_replies(clean, PF.get(clean), lang),
             "removed": removed}
 
 
@@ -510,26 +530,37 @@ def call_model(client: Any, convo: list[dict[str, str]]) -> tuple[dict[str, Any]
     return out, convo
 
 
-#: 用户这句话有没有要「拿掉 / 换掉」东西。没有的话，模型新给的草案里少了的检查项和设备要补回来——
-#: 实测模型重写整份草案时会顺手丢掉用户刚「采纳」或「选用」进来的检查项（它没记住），用户并没让删。
+#: 用户这句话有没有要「拿掉 / 换掉」东西。
 REMOVAL_RX = re.compile(r"去掉|删|移除|不要(?!改|动)|不用(?!改|动)|取消|换掉|换成|换几|只看|只查|只留|只保留|仅|"
                         r"\b(?:remove|drop|delete|without|only|instead|replace|exclude)\b", re.IGNORECASE)
 
 
 def keep_unrequested_removals(cand: dict[str, Any], prev: dict[str, Any] | None, user_text: str) -> list[str]:
-    """用户没要求删，就把模型丢掉的设备 / 检查项补回草案。返回补回了什么（给调用方记录）。"""
-    if not prev or REMOVAL_RX.search(user_text or ""):
+    """模型重写整份草案时会顺手丢掉用户**刚亲手**采纳 / 勾选进来的检查项（它没记住）——只补回这些。
+
+    只看 `prefs.picked`（上一轮之后用户亲手采纳 / 勾选的检查项和设备），**不拿整份旧草案比**：旧草案里别的东西
+    （按角色默认带进来的、模型自己加的）模型这一轮拿掉了就是拿掉了。以下情况一律不补：
+    在 removed 里（用户删过）；这句话是意图替换（「我需要的是 X」「不要 X」「只要 Y」）或要删东西。
+    返回补回了什么。"""
+    if not prev:
+        return []
+    prefs = PF.get(prev)
+    if REMOVAL_RX.search(user_text or "") or PF.INTENT_CHANGE.search(user_text or ""):
         return []
     restored: list[str] = []
+    picked_dev = set(prefs.get("picked_devices") or [])
     have_dev = {d["name"] for d in cand.get("devices") or []}
     for d in prev.get("devices") or []:
-        if d.get("name") and d["name"] not in have_dev:
+        if d.get("name") in picked_dev and d["name"] not in have_dev:
             cand.setdefault("devices", []).append(dict(d))
             have_dev.add(d["name"])
             restored.append(f"device {d['name']}")
+    picked = set(prefs.get("picked") or [])
     have_chk = {c.get("id") for c in cand.get("checks") or []}
     have_cmd = {c.get("command") for c in cand.get("checks") or []}
     for c in prev.get("checks") or []:
+        if c.get("id") not in picked or PF.is_removed(prefs, c):
+            continue
         if c.get("id") not in have_chk and c.get("command") not in have_cmd:
             cand.setdefault("checks", []).append(json.loads(json.dumps(c)))
             restored.append(f"check {c.get('id')}")
@@ -538,9 +569,18 @@ def keep_unrequested_removals(cand: dict[str, Any], prev: dict[str, Any] | None,
 
 def evaluate(out: dict[str, Any], prev: dict[str, Any] | None, topology: dict[str, Any], lang: str,
              user_text: str = "") -> tuple[dict[str, Any], list[str]]:
-    """模型输出 → 候选草案 + 硬错误（转换时发现的 + `check_draft` 的，含只读白名单）。用户没要求删的东西不许模型删。"""
+    """模型输出 → 候选草案 + 硬错误（转换时发现的 + `check_draft` 的，含只读白名单）。
+    用户刚亲手选的东西不许模型无故删；用户删过的东西不许模型加回来（偏好跟着草案走）。"""
     cand, problems = draft_from_model(out, prev, topology, lang)
+    prefs = PF.get(prev)
+    PF.put(cand, prefs)
     keep_unrequested_removals(cand, prev, user_text)
+    if PF.read_text(user_text)["exclusive"]:
+        # 「我需要的是 X」「只要 X」：模型若还留着跟 X 无关的模板检查（多半是上一版按角色默认带进来的），按替换处理
+        related = set(PF.related_templates(prefs))
+        cand["checks"] = [c for c in cand.get("checks") or [] if not c.get("template") or c["template"] in related]
+    cand, _dropped = PF.enforce(cand, prefs)
+    PF.put(cand, PF.clear_picked(prefs))  # 「刚亲手选的」只保护这一轮
     return cand, problems + P.check_draft(cand)["problems"]
 
 
@@ -571,7 +611,8 @@ def finish_turn(out: dict[str, Any], candidate: dict[str, Any], problems: list[s
         "validation": validation,
         "ready": bool(out.get("ready")) and validation["ok"],
         "suggestions": merge_suggestions(out.get("suggestions") or [], clean, topology, lang),
-        "quick_replies": [str(x)[:40] for x in out.get("quick_replies") or []][:3],
+        "quick_replies": (PF.filter_quick_replies([str(x)[:40] for x in out.get("quick_replies") or []], PF.get(clean))
+                          or PF.quick_replies(clean, PF.get(clean), lang))[:3],
         "source": "llm",
         "fix_rounds": repairs,
         "removed": removed,

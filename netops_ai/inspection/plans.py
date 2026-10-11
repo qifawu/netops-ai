@@ -151,6 +151,25 @@ TEMPLATES: dict[str, dict[str, Any]] = {
             "extract": [{"name": "route_count", "regex": r"=\s*(\d+)", "cast": "int"}],
         },
     },
+    "route_table_diff": {
+        "title": {"zh": "路由表明细对比", "en": "Routing table detail diff"},
+        "what": {"zh": "整张路由表逐条跟上一次巡检比：列出新增 / 消失的路由（等价多路径逐条算），有变化就报警；首次运行只记录基线",
+                 "en": "The whole routing table compared entry by entry with the previous run: routes (and ECMP paths) that appeared or "
+                       "disappeared; any change alerts. The first run only records a baseline"},
+        "kind": "state", "roles": [],
+        "check": {
+            # begin Gateway：跳过开头那段固定的代码说明；每次都一样的命令，输出顺序稳定
+            "command": "show ip route | begin Gateway",
+            "expect": [{"type": "output_diff_vs_previous", "severity": "critical", "max_added": 0, "max_removed": 0,
+                        # 「is variably subnetted, N subnets」这种汇总行里的数字随路由增减变，不是路由本身
+                        "ignore_regex": [r"is (?:variably )?subnetted"],
+                        # 路由老化时间（01:50:02 / 1d02h / 2w3d）每次都变，剪掉
+                        "strip_regex": [r"\s\d+:\d{2}:\d{2},", r"\s\d+[ywd]\d+[wdh],"],
+                        # 等价多路径的续行（以空白 + [AD/metric] 开头）带上前缀，各自一行
+                        "continuation_regex": r"^\s+\[\d+/\d+\]",
+                        "key_regex": rf"^.*?{_IPV4}(?:/\d+)?"}],
+        },
+    },
     "memory": {
         "title": {"zh": "内存", "en": "Memory"},
         "what": {"zh": "处理器内存池的已用 / 空闲字节数", "en": "Processor pool used / free bytes"},
@@ -681,6 +700,7 @@ def save_plan(draft: dict[str, Any], *, enabled: bool = True, overwrite: bool = 
     """保存（用户点了「确认并启用」）。**保存前再校验一次**，不过就拒绝，什么都不写。"""
     plan = json.loads(json.dumps(draft or {}))
     plan.pop("ready", None)
+    plan.pop("prefs", None)  # 制定对话里的偏好记忆只属于那次对话，不进计划文件
     name = safe_name(plan.get("name"))
     plan["enabled"] = bool(enabled)
     plan.setdefault("vendor", "cisco")
