@@ -75,6 +75,15 @@ def plan_json_schema() -> dict:
             "daily_at": {"type": "string", "description": "\"\" = no schedule change."},
         },
     }
+    script_request = {
+        "type": "object", "additionalProperties": False, "required": ["check_id", "title", "command", "goal"],
+        "properties": {
+            "check_id": {"type": "string", "description": "English identifier for the new check, e.g. route-table-diff. Reuse the id of an existing script check to revise it."},
+            "title": {"type": "string", "description": "Short human title, in the user's language."},
+            "command": {"type": "string", "description": "ONE full read-only show command whose output the script will judge."},
+            "goal": {"type": "string", "description": "What the user wants detected, in full, in the user's own words, including what to ignore."},
+        },
+    }
     return {
         "type": "json_schema",
         "json_schema": {
@@ -83,7 +92,7 @@ def plan_json_schema() -> dict:
             "schema": {
                 "type": "object", "additionalProperties": False,
                 "required": ["reply", "plan_name", "description", "devices", "checks", "schedule", "enabled", "suggestions", "ready",
-                             "quick_replies"],
+                             "quick_replies", "script_requests"],
                 "properties": {
                     "reply": {"type": "string"},
                     "plan_name": {"type": "string", "description": "English identifier, letters/digits/_.-, e.g. core-ospf-errors."},
@@ -96,6 +105,8 @@ def plan_json_schema() -> dict:
                     "enabled": {"type": "boolean", "description": "false only when the user asked to pause the plan."},
                     "ready": {"type": "boolean"},
                     "quick_replies": _str_list(),
+                    "script_requests": {"type": "array", "items": script_request,
+                                        "description": "Needs the templates and rules cannot express. [] when none."},
                 },
             },
         },
@@ -114,6 +125,7 @@ Rules for the draft:
 - devices: names from `topology_devices` only.
 - checks: prefer templates — set `template` to a template id and leave id/title/command/expect/extract empty. Write a custom check (template "") only when no template fits: one full read-only `show ...` command (no abbreviations, no placeholders), preferably from `command_catalog`, expect/extract regexes that match real Cisco IOS output. Never propose configuration, clear, reload, debug, copy or any command that changes the device: a whitelist rejects them and they never reach the device.
 - A check's `devices` = [] means every plan device; otherwise list the subset (e.g. BGP only on core).
+- When the user needs something NO template and NO custom check with expect/extract rules can express — typically a judgement that compares the whole output with the previous run entry by entry (routing table detail diff, ARP/MAC table changes, ACL hit counters moving, "these neighbors must stay the same"), or parsing a table and applying their own logic — do NOT pretend a template covers it and do NOT tell the user it is impossible. Put it in `script_requests` (check_id, title, one read-only show command, and the user's goal in full). The assistant then takes a real output sample from a device, writes a small sandboxed script, tests it, and shows the code to the user for approval. Do not put that check in `checks`; say in `reply` that you are writing and testing a script and the user will review it. Revise an existing script check by sending its id again with the new goal.
 - "Alert when the number of routes drops compared with last time" (or similar "fewer than the previous run") → use the `route_count` template: it counts the routing table entries and compares each run with the previous one (the first run records a baseline).
 - "Which routes changed / routing table details compared with last time / route table diff" → use the `route_table_diff` template: it compares the whole routing table line by line with the previous run and lists the routes that appeared or disappeared. A request for the routing table is NOT a request for OSPF neighbors or BGP sessions; do not add those unless the user names them.
 - schedule: `every_minutes` (integer) or `daily_at` "HH:MM" (server local time); set the unused one to 0 / "". If the user has not said, set both to 0 / "" and ask.
@@ -201,7 +213,11 @@ def _compact_draft(draft: dict[str, Any] | None) -> dict[str, Any]:
     checks = []
     for c in d.get("checks") or []:
         row = {"id": c.get("id"), "template": c.get("template", "")}
-        if not c.get("template"):
+        script = next((e for e in c.get("expect") or [] if isinstance(e, dict) and e.get("type") == "script"), None)
+        if script is not None:
+            # 判定脚本由助手写、用户审核；上下文里只告诉模型「有这么一条脚本检查」，别让它重写整份源码
+            row.update(command=c.get("command"), script_check=True, title=c.get("title"), approved=bool(script.get("approved")))
+        elif not c.get("template"):
             row.update(command=c.get("command"), expect=c.get("expect") or [], extract=c.get("extract") or [])
         if c.get("devices") is not None:
             row["devices"] = c["devices"]
@@ -567,6 +583,21 @@ def keep_unrequested_removals(cand: dict[str, Any], prev: dict[str, Any] | None,
     return restored
 
 
+def _is_script_check(c: dict[str, Any]) -> bool:
+    return any(isinstance(e, dict) and e.get("type") == "script" for e in c.get("expect") or [])
+
+
+def _keep_script_checks(cand: dict[str, Any], prev: dict[str, Any] | None, prefs: dict[str, Any]) -> None:
+    """模型每一轮都整份重写草案，不会带着助手写的判定脚本检查项（源码和审核状态只在草案里）：从上一版原样带过来，
+    用户删过的（prefs.removed）不带。模型要改它走 script_requests，由 author_scripts 节点重写。"""
+    have = {c.get("id") for c in cand.get("checks") or []}
+    for c in (prev or {}).get("checks") or []:
+        if _is_script_check(c) and c.get("id") not in have and not PF.is_removed(prefs, c):
+            cand.setdefault("checks", []).append(json.loads(json.dumps(c)))
+    if (prev or {}).get("script_reviews") and "script_reviews" not in cand:
+        cand["script_reviews"] = json.loads(json.dumps(prev["script_reviews"]))
+
+
 def evaluate(out: dict[str, Any], prev: dict[str, Any] | None, topology: dict[str, Any], lang: str,
              user_text: str = "") -> tuple[dict[str, Any], list[str]]:
     """模型输出 → 候选草案 + 硬错误（转换时发现的 + `check_draft` 的，含只读白名单）。
@@ -575,6 +606,7 @@ def evaluate(out: dict[str, Any], prev: dict[str, Any] | None, topology: dict[st
     prefs = PF.get(prev)
     PF.put(cand, prefs)
     keep_unrequested_removals(cand, prev, user_text)
+    _keep_script_checks(cand, prev, prefs)
     if PF.read_text(user_text)["exclusive"]:
         # 「我需要的是 X」「只要 X」：模型若还留着跟 X 无关的模板检查（多半是上一版按角色默认带进来的），按替换处理
         related = set(PF.related_templates(prefs))

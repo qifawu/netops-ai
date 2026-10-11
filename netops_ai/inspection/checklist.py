@@ -88,7 +88,9 @@ TEXT_EXPECT_TYPES = ("contains", "not_contains", "regex", "not_regex")
 METRIC_EXPECT_TYPES = ("metric_vs_previous", "metric_threshold", "metric_vs_baseline")
 #: 有状态的明细对比：整份输出按行集合跟上一次成功采到的输出比（新增 / 消失了哪些行）
 DIFF_EXPECT_TYPES = ("output_diff_vs_previous",)
-STATEFUL_EXPECT_TYPES = METRIC_EXPECT_TYPES + DIFF_EXPECT_TYPES
+#: 助手按用户需求写、用户审核过的判定脚本（check_script.py）：模板和固定规则表达不了的需求
+SCRIPT_EXPECT_TYPES = ("script",)
+STATEFUL_EXPECT_TYPES = METRIC_EXPECT_TYPES + DIFF_EXPECT_TYPES + SCRIPT_EXPECT_TYPES
 EXPECT_TYPES = TEXT_EXPECT_TYPES + STATEFUL_EXPECT_TYPES
 DIRECTIONS = ("decrease", "increase", "change")
 THRESHOLD_OPS = (">", "<", ">=", "<=")
@@ -239,11 +241,29 @@ def _validate_diff_expect(where: str, e: dict[str, Any]) -> list[str]:
     return out
 
 
+def _validate_script_expect(where: str, e: dict[str, Any]) -> list[str]:
+    """判定脚本：静态检查源码；sha256 必须对得上；**没有用户审核通过（approved: true）的脚本不能保存**。"""
+    from netops_ai.inspection import check_script as CS
+
+    out = [f"{where}: {p}" for p in CS.validate_source(e.get("source"))]
+    if e.get("sha256") != CS.sha256(str(e.get("source") or "")):
+        out.append(f"{where}.sha256: does not match the source (the script was changed after review)")
+    if e.get("approved") is not True:
+        out.append(f"{where}.approved: the script has not been reviewed and approved by the user yet")
+    if e.get("severity", "warning") not in SEVERITIES:
+        out.append(f"{where}.severity: one of {', '.join(SEVERITIES)}")
+    if not isinstance(e.get("params", {}), dict):
+        out.append(f"{where}.params: must be a mapping")
+    return out
+
+
 def _validate_expect(where: str, e: Any, metric_names: set[str] | None = None) -> list[str]:
     if not isinstance(e, dict):
         return [f"{where}: must be a mapping"]
     if e.get("type") in DIFF_EXPECT_TYPES:
         return _validate_diff_expect(where, e)
+    if e.get("type") in SCRIPT_EXPECT_TYPES:
+        return _validate_script_expect(where, e)
     if e.get("type") in METRIC_EXPECT_TYPES:
         return _validate_metric_expect(where, e, metric_names or set())
     out: list[str] = []
@@ -443,6 +463,8 @@ def evaluate_expectations(check: dict[str, Any], output: str, metrics: dict[str,
     for e in check.get("expect") or []:
         if e.get("type") in DIFF_EXPECT_TYPES:
             evals.append(evaluate_diff_rule(e, diff_text, diff_trunc, dev, check["id"], hist))
+        elif e.get("type") in SCRIPT_EXPECT_TYPES:
+            evals.append(evaluate_script_rule(e, diff_text, diff_trunc, dev, check["id"], hist))
         elif e.get("type") in METRIC_EXPECT_TYPES:
             evals.append(evaluate_metric_rule(e, metrics.get(e["metric"]), dev, check["id"], hist))
         else:
@@ -451,7 +473,33 @@ def evaluate_expectations(check: dict[str, Any], output: str, metrics: dict[str,
 
 
 def has_diff_rule(check: dict[str, Any]) -> bool:
-    return any(isinstance(e, dict) and e.get("type") in DIFF_EXPECT_TYPES for e in check.get("expect") or [])
+    """需要把整份输出存下来当下次参考的检查项（明细对比 / 判定脚本）。"""
+    return any(isinstance(e, dict) and e.get("type") in DIFF_EXPECT_TYPES + SCRIPT_EXPECT_TYPES for e in check.get("expect") or [])
+
+
+def evaluate_script_rule(e: dict[str, Any], output: str, truncated: bool, dev: str, cid: str, hist: MetricHistory) -> dict[str, Any]:
+    """跑一条判定脚本（沙箱）。`passed` 为 None = 这次不判（首次建基线）；脚本出错 / 未审核 / 源码被改 = 判失败并写明原因，
+    **不会静默通过**。比较用的「上一次」取自存档里最近一次成功采集到的输出。"""
+    from netops_ai.inspection import check_script as CS
+
+    out: dict[str, Any] = {"type": "script", "severity": e.get("severity", "warning"), "name": e.get("name") or "script",
+                           "value": f"script {e.get('name') or ''} {str(e.get('sha256') or '')[:8]}".strip(), "findings": [],
+                           "reference_run_id": None, "script_metrics": {}, "truncated": truncated}
+    if e.get("approved") is not True or e.get("sha256") != CS.sha256(str(e.get("source") or "")):
+        return {**out, "passed": False, "state": "error", "detail": "script is not approved or was changed after review; not executed"}
+    ref = hist.snapshot(dev, cid)
+    prev_text = ref[2] if ref else None
+    out["reference_run_id"] = ref[1] if ref else None
+    try:
+        r = CS.run_script(e["source"], {"output": output, "previous": prev_text, "previous_run": out["reference_run_id"],
+                                        "device": dev, "params": e.get("params") or {}})
+    except CS.ScriptError as exc:
+        return {**out, "passed": False, "state": "error", "detail": f"script error: {exc}"}
+    note = " (output truncated: judged on what was collected)" if truncated else ""
+    out.update(findings=r["findings"], script_metrics=r["metrics"], detail=(r["summary"] or r["status"]) + note)
+    if r["status"] == "baseline":
+        return {**out, "passed": None, "state": "baseline"}
+    return {**out, "passed": r["status"] == "pass", "state": r["status"]}
 
 
 def _describe_metric_rule(e: dict[str, Any]) -> str:
@@ -522,6 +570,9 @@ def _run_check(adapter: Any, check: dict[str, Any], dev_name: str = "", hist: Me
         # 下次对比的参考：只存这一份（不进每条判定）；不可达 / 被拒 / 出错的运行走不到这里，不会覆盖基线
         item["diff_output"], item["diff_truncated"] = cap_diff_output(output)
     item["evaluations"] = evaluate_expectations(check, output, item["metrics"], dev_name, hist or MetricHistory())
+    for ev in item["evaluations"]:
+        if ev.get("script_metrics"):  # 脚本自己算出来的数（如路由条数）和提取出来的一样进趋势表
+            item["metrics"].update(ev["script_metrics"])
     failed = [e for e in item["evaluations"] if e["passed"] is False]  # None = 这次不判（首次基线等）
     item["status"] = "fail" if failed else "pass"
     if failed:

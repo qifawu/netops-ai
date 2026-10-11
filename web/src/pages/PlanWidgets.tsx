@@ -10,7 +10,7 @@ import { Btn } from "../lib/sopui";
 
 export type PickerDevice = { name: string; role: string; host: string; neighbors: number };
 export type Widget = {
-  id: string; type: "device_picker" | "schedule_picker" | "check_picker"; prompt?: string;
+  id: string; type: "device_picker" | "schedule_picker" | "check_picker" | "script_review"; prompt?: string;
   groups?: { role: string; label: string; devices: PickerDevice[] }[];
   selected?: string[] | { every_minutes?: number; daily_at?: string };
   options?: number[]; daily?: boolean; hint?: string;
@@ -217,5 +217,71 @@ export function Hints({ hints, onClose }: { hints: Hint[]; onClose: (id: string)
         </div>
       ))}
     </div>
+  );
+}
+
+
+export type ScriptItem = {
+  check_id: string; title: string; command: string; goal: string; explanation: string; source: string; sha256: string;
+  ok: boolean; error: string; rounds: number; sample_device: string; sample_head: string;
+  cases: { name: string; status: string; summary: string; findings: string[]; plausible: boolean; note: string }[];
+};
+
+/** 助手写的判定脚本的审核气泡：目标、思路、源码、真实样本、自测用例；批准后才会启用（自测没通过的只能拒绝）。 */
+export function ScriptReview({ w, onSubmit }: { w: Widget; onSubmit: (s: Selection, summary: string) => void }) {
+  const t = useT();
+  const items = (w.items ?? []) as unknown as ScriptItem[];
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const act = (it: ScriptItem, action: "approve" | "reject") =>
+    onSubmit({ widget_id: w.id, type: "script_review", value: { check_id: it.check_id, action } },
+      (action === "approve" ? t("plans.script.approved") : t("plans.script.rejected")) + it.title);
+  return (
+    <Frame title={t("plans.script.title")} testid="widget-script">
+      <div className="divide-y divide-line">
+        {items.map((it) => (
+          <div key={it.check_id} className="px-3 py-2" data-testid={`script-${it.check_id}`}>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[0.8125rem] font-semibold text-slate-800">{it.title}</span>
+              <code className="font-mono text-[0.71875rem] text-slate-600">{it.command}</code>
+              <Badge className={it.ok ? "bg-white text-emerald-700 ring-slate-300" : "bg-rose-50 text-rose-700 ring-rose-200"}>
+                {it.ok ? t("plans.script.testsOk") : t("plans.script.testsFail")}
+              </Badge>
+            </div>
+            {it.goal && <p className="mt-1 text-xs leading-relaxed text-slate-700">{it.goal}</p>}
+            {it.explanation && <p className="mt-1 text-xs leading-relaxed text-slate-600">{it.explanation}</p>}
+            {it.error && <p className="mt-1 text-xs leading-relaxed text-rose-700">{it.error}</p>}
+            <table className="mt-2 w-full table-fixed border border-line text-xs" data-testid="script-cases">
+              <thead className="bg-[#f6f7f9] text-left text-dim">
+                <tr><th className="w-[34%] px-2 py-1 font-medium">{t("plans.script.case")}</th><th className="w-[14%] px-2 py-1 font-medium">{t("plans.script.status")}</th>
+                  <th className="px-2 py-1 font-medium">{t("plans.script.result")}</th></tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {it.cases.map((c) => (
+                  <tr key={c.name} className="align-top">
+                    <td className="px-2 py-1">{c.name}</td>
+                    <td className="px-2 py-1 font-mono">{c.status}{c.plausible ? "" : " ⚠"}</td>
+                    <td className="px-2 py-1 break-words text-slate-700">{c.note || c.summary}{c.findings.length > 0 && <span className="font-mono text-[0.6875rem] text-dim"> · {c.findings.join(" | ")}</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-[0.6875rem] text-slate-500">
+              <button type="button" className="hover:text-brand" aria-expanded={!!open[it.check_id + ":src"]}
+                onClick={() => setOpen((o) => ({ ...o, [it.check_id + ":src"]: !o[it.check_id + ":src"] }))}>{t("plans.script.source")}</button>
+              <button type="button" className="hover:text-brand" aria-expanded={!!open[it.check_id + ":smp"]}
+                onClick={() => setOpen((o) => ({ ...o, [it.check_id + ":smp"]: !o[it.check_id + ":smp"] }))}>{t("plans.script.sample")}{it.sample_device ? ` · ${it.sample_device}` : ""}</button>
+              <span className="font-mono">sha256 {it.sha256.slice(0, 12)}</span>
+            </div>
+            {open[it.check_id + ":src"] && <pre className="term mt-1 max-h-72 overflow-auto px-2 py-1.5 text-[0.71875rem] whitespace-pre" data-testid="script-source">{it.source}</pre>}
+            {open[it.check_id + ":smp"] && <pre className="term mt-1 max-h-48 overflow-auto px-2 py-1.5 text-[0.71875rem] whitespace-pre">{it.sample_head}</pre>}
+            <div className="mt-2 flex items-center gap-2">
+              <Btn small tone="brand" type="button" disabled={!it.ok} onClick={() => act(it, "approve")}>{t("plans.script.approve")}</Btn>
+              <Btn small type="button" onClick={() => act(it, "reject")}>{t("plans.script.reject")}</Btn>
+              {!it.ok && <span className="text-[0.6875rem] text-rose-700">{t("plans.script.cannotApprove")}</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Frame>
   );
 }

@@ -231,15 +231,16 @@ class TestGraph(Tmp):
         self.assertEqual(set(g.nodes) - {"__start__", "__end__"},
                          {"route_intent", "opening", "list_plans", "load_plan", "gather_context", "lookup_commands", "propose",
                           "validate", "repair", "respond", "respond_blocked", "rules_fallback", "confirm_plan", "save",
-                          "apply_selection"})
+                          "apply_selection", "author_scripts"})
         edges = {(e.source, e.target, e.conditional) for e in g.edges}
         for src, dst in [("__start__", "route_intent"), ("opening", "__end__"), ("list_plans", "__end__"), ("load_plan", "__end__"),
-                         ("lookup_commands", "propose"), ("respond_blocked", "__end__"), ("apply_selection", "validate")]:
+                         ("lookup_commands", "propose"), ("respond_blocked", "__end__"), ("apply_selection", "validate"),
+                         ("author_scripts", "respond")]:
             self.assertIn((src, dst, False), edges, (src, dst))
         for src, dst in [("route_intent", "opening"), ("route_intent", "list_plans"), ("route_intent", "load_plan"),
                          ("route_intent", "gather_context"), ("gather_context", "lookup_commands"), ("gather_context", "propose"),
                          ("propose", "validate"), ("propose", "rules_fallback"), ("validate", "respond"), ("validate", "repair"),
-                         ("validate", "respond_blocked"), ("repair", "validate"), ("repair", "rules_fallback"),
+                         ("validate", "respond_blocked"), ("validate", "author_scripts"), ("repair", "validate"), ("repair", "rules_fallback"),
                          ("respond", "confirm_plan"), ("respond", "__end__"), ("rules_fallback", "confirm_plan"),
                          ("rules_fallback", "__end__"), ("confirm_plan", "save"), ("confirm_plan", "propose"),
                          ("confirm_plan", "gather_context"), ("save", "__end__"), ("save", "confirm_plan"),

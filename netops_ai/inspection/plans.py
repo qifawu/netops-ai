@@ -558,7 +558,8 @@ def sanitize(draft: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
             continue
         probe = {"name": "x", "vendor": d.get("vendor", "cisco"), "devices": d.get("devices") or [{"name": "_", "host": "_"}],
                  "checks": [c]}
-        own = [p for p in validate_checklist(probe) if p.startswith("checks[0]")]
+        # 还没批准的判定脚本不是「坏检查项」：它要留在草案里等用户审核（校验仍会报「没批准」，所以进不了确认环节）
+        own = [p for p in validate_checklist(probe) if p.startswith("checks[0]") and "has not been reviewed" not in p]
         if own:
             bad_idx.add(i)
             removed.append(f"removed checks[{i}] {c.get('id') if isinstance(c, dict) else c!r}: " + "; ".join(own))
@@ -701,6 +702,7 @@ def save_plan(draft: dict[str, Any], *, enabled: bool = True, overwrite: bool = 
     plan = json.loads(json.dumps(draft or {}))
     plan.pop("ready", None)
     plan.pop("prefs", None)  # 制定对话里的偏好记忆只属于那次对话，不进计划文件
+    plan.pop("script_reviews", None)  # 审核气泡用的样本 / 自测结果同理；脚本源码和 sha256 在检查项自己的 expect 里
     name = safe_name(plan.get("name"))
     plan["enabled"] = bool(enabled)
     plan.setdefault("vendor", "cisco")

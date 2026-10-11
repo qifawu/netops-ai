@@ -30,6 +30,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from pathlib import Path
@@ -42,10 +43,14 @@ from langgraph.types import Command, interrupt
 from netops_ai.inspection import command_lookup as CMD
 from netops_ai.inspection import plan_chat as PC
 from netops_ai.inspection import plan_widgets as W
+from netops_ai.inspection import script_author as SA
+from netops_ai.devices.whitelist import check as whitelist_check
 from netops_ai.inspection import plan_prefs as PF
 from netops_ai.inspection import plans as P
 
 MAX_REPAIRS = PC.MAX_FIX_ROUNDS
+#: 一轮最多帮用户写几个判定脚本（每个都要采样本、调模型、沙箱自测，不能无限扩）
+MAX_SCRIPTS_PER_TURN = 2
 CONFIRM_ITEMS = ("commands", "devices", "schedule")
 _EDIT_WORDS = re.compile(r"调整|修改|改一下|改改|编辑|暂停|\b(?:edit|adjust|modify|change|pause)\b", re.IGNORECASE)
 
@@ -80,6 +85,7 @@ class PlanState(TypedDict, total=False):
     problems: list[str]
     model_error: str
     removed: list[str]
+    script_notes: list[str]             # author_scripts 这一轮没写成 / 没采到样本的原因（原样告诉用户）
     # ---- 选择气泡 / 提示泡
     selection: dict[str, Any] | None    # 这一轮用户提交的选择 {widget_id, type, value}
     via_selection: bool                 # 这一轮走的是确定性的选择路径（没调模型）
@@ -97,7 +103,7 @@ class PlanState(TypedDict, total=False):
 #: 每轮开始时要清掉的中间量（同一个 thread 上一轮留下的值不能串到这一轮）
 _TURN_RESET: dict[str, Any] = {
     "repairs": 0, "suggestions": [], "ready": False, "reply": "", "quick_replies": [], "source": "", "llm_messages": [],
-    "model_out": None, "candidate": None, "problems": [], "model_error": "", "removed": [], "saved": None, "save_error": None,
+    "model_out": None, "candidate": None, "problems": [], "model_error": "", "removed": [], "script_notes": [], "saved": None, "save_error": None,
     "validation": {"ok": False, "problems": [], "missing": []}, "route": "", "plans": [], "lookup": False, "candidates": [],
     "docs_status": "", "lookup_note": "", "confirm_card": None,
     "selection": None, "via_selection": False, "selection_summary": "", "widget": None, "hints": [],
@@ -110,9 +116,31 @@ def _last_user(messages: list[dict[str, str]]) -> str:
 
 def build_graph(*, llm_factory: Callable[[], Any] | None = None,
                 topology_loader: Callable[[], dict[str, Any]] | None = None,
-                docs_db: Callable[[], str | Path | None] | None = None) -> StateGraph:
+                docs_db: Callable[[], str | Path | None] | None = None,
+                sample_runner: Callable[[str, str, str], str] | None = None) -> StateGraph:
     """搭图（未编译）。`llm_factory()` 每轮现建一个客户端（.env 改了不用重启）；返回 None 等于模型不可用。
     `docs_db()` 给文档库索引路径（默认 `.env` 的 DOC_SEARCH_DB，再默认 records/docs_kb.db）。"""
+
+    def _sample(command: str, host: str, name: str) -> str:
+        """在设备上采一份只读命令输出当脚本的样本。默认走拓扑里的设备适配器（只读白名单）；测试注入假的。"""
+        if sample_runner is not None:
+            return sample_runner(command, host, name)
+        from types import SimpleNamespace
+
+        from netops_ai.topology import _default_adapter_factory
+
+        adapter = _default_adapter_factory(SimpleNamespace(name=name, host=host))
+        try:
+            res = adapter.run(command)
+        finally:
+            close = getattr(adapter, "close", None)
+            if callable(close):
+                close()
+        if not getattr(res, "allowed", True):
+            raise RuntimeError(f"refused by the read-only whitelist: {getattr(res, 'denial_reason', '')}")
+        if getattr(res, "error", ""):
+            raise RuntimeError(str(res.error))
+        return str(res.output or "")
 
     def _llm() -> Any:
         if llm_factory is not None:
@@ -241,12 +269,53 @@ def build_graph(*, llm_factory: Callable[[], Any] | None = None,
             return {"model_error": str(exc), "repairs": state.get("repairs", 0) + 1}
         return {"model_out": out, "llm_messages": convo, "repairs": state.get("repairs", 0) + 1}
 
+    def author_scripts(state: PlanState) -> dict:
+        """模板和固定规则表达不了的需求：在选定设备上用只读白名单命令采一份真实输出样本，让模型照样本写判定脚本，
+        沙箱自测（不过就带着问题改），把「未批准的脚本检查项 + 源码 + 自测结果」放进草案——用户批准前不会启用。"""
+        reqs = [r for r in (state.get("model_out") or {}).get("script_requests") or [] if isinstance(r, dict)][:MAX_SCRIPTS_PER_TURN]
+        cand = json.loads(json.dumps(state.get("candidate") or P.empty_draft()))
+        zh = state.get("lang", "zh") != "en"
+        notes: list[str] = []
+        reviews = cand.setdefault("script_reviews", {})
+        for r in reqs:
+            cid = P.slug(r.get("check_id"), "script-check")[:40]
+            command = " ".join(str(r.get("command") or "").split())
+            goal = str(r.get("goal") or "").strip()[:1000]
+            title = str(r.get("title") or cid).strip()[:80]
+            verdict = whitelist_check(cand.get("vendor", "cisco"), command) if command else None
+            if verdict is None or not verdict.allowed:
+                notes.append((f"「{title}」的命令被只读白名单拒绝：{verdict.reason if verdict else '没有给命令'}" if zh
+                              else f"The command for {title!r} was refused by the read-only whitelist: {verdict.reason if verdict else 'no command'}"))
+                continue
+            devs = [d for d in cand.get("devices") or [] if d.get("host")]
+            if not devs:
+                notes.append("还没有选设备，没法采样本；先选设备范围。" if zh else "No devices selected yet, so no sample can be taken; pick the devices first.")
+                continue
+            try:
+                sample = _sample(command, devs[0]["host"], devs[0]["name"])
+            except Exception as exc:  # noqa: BLE001 - 采不到样本不炸整个回合
+                notes.append((f"在 {devs[0]['name']} 上采样本失败：{str(exc)[:160]}" if zh else f"Could not take a sample on {devs[0]['name']}: {str(exc)[:160]}"))
+                continue
+            authored = SA.author_script(goal, command, sample, _llm(), lang=state.get("lang", "zh"))
+            if not authored.get("source"):
+                notes.append((f"没能写出「{title}」的脚本：{authored.get('error')}" if zh else f"Could not write the script for {title!r}: {authored.get('error')}"))
+                continue
+            item = SA.pending_check(cid, title, command, authored)
+            cand["checks"] = [c for c in cand.get("checks") or [] if c.get("id") != cid] + [item]
+            reviews[cid] = {"goal": goal, "explanation": authored.get("explanation", ""), "ok": bool(authored.get("ok")),
+                            "tests": authored.get("tests"), "error": authored.get("error", ""), "rounds": authored.get("rounds", 1),
+                            "sample_device": devs[0]["name"], "sample_head": "\n".join(sample.splitlines()[:30])}
+        return {"candidate": cand, "script_notes": notes}
+
     def respond(state: PlanState) -> dict:
         """校验通过：整理回复、合并建议、算 ready；草案还缺设备 / 周期 / 检查项就附上对应的选择气泡。"""
         if state.get("via_selection"):
             return _ui(state, _selection_turn(state, _topo()), _topo())
-        return _ui(state, _with_lookup(state, PC.finish_turn(state["model_out"], state["candidate"], [], state.get("repairs", 0),
-                                                             _topo(), state["lang"])), _topo())
+        out = _with_lookup(state, PC.finish_turn(state["model_out"], state["candidate"], [], state.get("repairs", 0),
+                                                 _topo(), state["lang"]))
+        if state.get("script_notes"):
+            out["reply"] = (out.get("reply") or "") + "\n\n" + "\n".join(state["script_notes"])
+        return _ui(state, out, _topo())
 
     def respond_blocked(state: PlanState) -> dict:
         """修正用尽仍不过：问题原样告诉用户，坏检查项从草案拿掉，ready=False，不进确认环节。"""
@@ -315,7 +384,8 @@ def build_graph(*, llm_factory: Callable[[], Any] | None = None,
         if state.get("via_selection"):
             return "respond"  # 选择路径不让模型修，问题直接告诉用户
         if not state.get("problems"):
-            return "respond"
+            reqs = (state.get("model_out") or {}).get("script_requests") or []
+            return "author_scripts" if reqs else "respond"
         return "repair" if state.get("repairs", 0) < MAX_REPAIRS else "respond_blocked"
 
     def after_repair(state: PlanState) -> str:
@@ -334,7 +404,7 @@ def build_graph(*, llm_factory: Callable[[], Any] | None = None,
     for name, fn in (("route_intent", route_intent), ("opening", opening), ("list_plans", list_plans), ("load_plan", load_plan),
                      ("gather_context", gather_context), ("lookup_commands", lookup_commands), ("propose", propose),
                      ("validate", validate), ("repair", repair), ("respond", respond), ("respond_blocked", respond_blocked),
-                     ("rules_fallback", rules_fallback), ("save", save)):
+                     ("rules_fallback", rules_fallback), ("save", save), ("author_scripts", author_scripts)):
         g.add_node(name, fn)
     g.add_node("apply_selection", apply_selection)
     g.add_node("confirm_plan", confirm_plan, destinations=("save", "propose", "gather_context", "apply_selection"))
@@ -346,7 +416,8 @@ def build_graph(*, llm_factory: Callable[[], Any] | None = None,
     g.add_conditional_edges("gather_context", after_context, ["lookup_commands", "propose"])
     g.add_edge("lookup_commands", "propose")
     g.add_conditional_edges("propose", after_propose, ["validate", "rules_fallback"])
-    g.add_conditional_edges("validate", after_validate, ["respond", "repair", "respond_blocked"])
+    g.add_conditional_edges("validate", after_validate, ["respond", "repair", "respond_blocked", "author_scripts"])
+    g.add_edge("author_scripts", "respond")
     g.add_conditional_edges("repair", after_repair, ["validate", "rules_fallback"])
     g.add_conditional_edges("respond", after_respond, ["confirm_plan", END])
     g.add_conditional_edges("rules_fallback", after_respond, ["confirm_plan", END])
@@ -366,7 +437,7 @@ def _ui(state: PlanState, out: dict, topology: dict[str, Any], *, opening: bool 
     """给这一轮回复附上选择气泡（草案缺什么给什么）和提示泡（每条每个对话只出现一次）。"""
     lang = state.get("lang", "zh")
     draft = out.get("draft") or state.get("draft") or {}
-    widget = W.widget_for_gap(draft, topology, lang)
+    widget = W.script_review_widget(draft, lang) or W.widget_for_gap(draft, topology, lang)
     hints = W.hints_for(draft, lang, shown=state.get("hints_shown") or [], opening=opening)
     out = {**out, "widget": widget, "hints": hints, "hints_shown": [*(state.get("hints_shown") or []), *(h["id"] for h in hints)]}
     if widget:
@@ -414,9 +485,11 @@ class PlanConversation:
     """一个对话会话 = 图上的一个 thread。前端每轮带全量消息；图停在确认环节时，下一句话从中断处恢复。"""
 
     def __init__(self, *, llm_factory: Callable[[], Any] | None = None, topology_loader: Callable[[], dict[str, Any]] | None = None,
-                 docs_db: Callable[[], str | Path | None] | None = None, checkpointer: Any = None) -> None:
+                 docs_db: Callable[[], str | Path | None] | None = None, checkpointer: Any = None,
+                 sample_runner: Callable[[str, str, str], str] | None = None) -> None:
         self._topology_loader = topology_loader
-        self.graph = build_graph(llm_factory=llm_factory, topology_loader=topology_loader, docs_db=docs_db).compile(
+        self.graph = build_graph(llm_factory=llm_factory, topology_loader=topology_loader, docs_db=docs_db,
+                                 sample_runner=sample_runner).compile(
             checkpointer=checkpointer if checkpointer is not None else MemorySaver())
 
     def _topology(self) -> dict[str, Any]:

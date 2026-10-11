@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
@@ -85,6 +86,40 @@ def build_widget(kind: str, draft: dict[str, Any] | None, topology: dict[str, An
     raise ValueError(f"unknown widget type {kind!r}")
 
 
+def pending_scripts(draft: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """草案里还没经用户审核批准的判定脚本检查项。"""
+    out = []
+    for c in (draft or {}).get("checks") or []:
+        for e in c.get("expect") or []:
+            if isinstance(e, dict) and e.get("type") == "script" and e.get("approved") is not True:
+                out.append(c)
+                break
+    return out
+
+
+def script_review_widget(draft: dict[str, Any], lang: str = "zh") -> dict[str, Any] | None:
+    """审核气泡：源码、自测用例结果、真实样本的前几行，一条一条批准或拒绝。没有待审脚本就没有。"""
+    pend = pending_scripts(draft)
+    if not pend:
+        return None
+    reviews = (draft or {}).get("script_reviews") or {}
+    items = []
+    for c in pend:
+        e = next(x for x in c["expect"] if x.get("type") == "script")
+        r = reviews.get(c["id"]) or {}
+        t = r.get("tests") or {}
+        items.append({"check_id": c["id"], "title": c.get("title") or c["id"], "command": c.get("command"), "goal": r.get("goal", ""),
+                      "explanation": r.get("explanation", ""), "source": e.get("source", ""), "sha256": e.get("sha256", ""),
+                      "ok": bool(r.get("ok")), "error": r.get("error", ""), "rounds": r.get("rounds", 1),
+                      "sample_device": r.get("sample_device", ""), "sample_head": r.get("sample_head", ""),
+                      "cases": [{"name": x.get("name"), "status": x.get("status"), "summary": x.get("summary", ""),
+                                 "findings": (x.get("findings") or [])[:3], "plausible": bool(x.get("plausible")),
+                                 "note": x.get("note") or x.get("error") or ""} for x in t.get("cases") or []]})
+    return {"id": uuid.uuid4().hex[:12], "type": "script_review", "items": items,
+            "prompt": ("请审核助手写的判定脚本：它只做文本处理，不能执行命令或联网；批准后才会启用。" if _zh(lang)
+                       else "Review the script the assistant wrote: it only processes text and cannot run commands or reach the network. It is enabled only after you approve it.")}
+
+
 def widget_for_gap(draft: dict[str, Any] | None, topology: dict[str, Any], lang: str = "zh") -> dict[str, Any] | None:
     gap = next_gap(draft)
     return build_widget(WIDGET_FOR_GAP[gap], draft, topology, lang) if gap else None
@@ -112,6 +147,8 @@ def apply_selection(draft: dict[str, Any] | None, selection: dict[str, Any], top
     base = P.apply_patch(draft, None, topology, lang)  # 规整一份（补默认字段 / 名字）
     kind = selection.get("type")
     value = selection.get("value") or {}
+    if kind == "script_review":
+        return _apply_script_review(base, value, lang)
     if kind == "device_picker":
         names = [str(x) for x in value.get("devices") or []]
         if not names:
@@ -158,6 +195,41 @@ def apply_selection(draft: dict[str, Any] | None, selection: dict[str, Any], top
         new = PF.track_check_selection(base, new, tids)  # 取消勾选的记成「用户删掉的」，以后不再补回
         return new, [], (("已选择检查项：" if zh else "Checks: ") + ("、" if zh else ", ").join(titles))
     return base, [f"unknown selection type {kind!r}"], ""
+
+
+def _apply_script_review(base: dict[str, Any], value: dict[str, Any], lang: str) -> tuple[dict[str, Any], list[str], str]:
+    """批准 / 拒绝一条判定脚本。批准要求自测通过（没通过的只能拒绝，或让助手改后再审）；批准时按源码重算 sha256。"""
+    from netops_ai.inspection import check_script as CS
+    from netops_ai.inspection import plan_prefs as PF
+
+    zh = _zh(lang)
+    cid = str(value.get("check_id") or "")
+    action = str(value.get("action") or "")
+    chk = next((c for c in base.get("checks") or [] if c.get("id") == cid and any(e.get("type") == "script" for e in c.get("expect") or [])), None)
+    if chk is None:
+        return base, [f"script {cid!r} is not in the draft"], ""
+    new = json.loads(json.dumps(base))
+    reviews = new.setdefault("script_reviews", {})
+    if action == "reject":
+        prefs = PF.record_removed(PF.get(new), [chk])
+        new["checks"] = [c for c in new["checks"] if c.get("id") != cid]
+        reviews.pop(cid, None)
+        PF.put(new, prefs)
+        return new, [], (f"已拒绝脚本检查「{chk.get('title') or cid}」" if zh else f"Rejected the script check {chk.get('title') or cid!r}")
+    if action != "approve":
+        return base, [f"unknown action {action!r}"], ""
+    rev = reviews.get(cid) or {}
+    if not rev.get("ok"):
+        return base, [("这个脚本没有通过自测，不能批准；可以让助手再改一版，或者拒绝它。" if zh
+                       else "The script did not pass its self-tests and cannot be approved; ask the assistant to revise it, or reject it.")], ""
+    for c in new["checks"]:
+        if c.get("id") == cid:
+            for e in c["expect"]:
+                if e.get("type") == "script":
+                    e["sha256"] = CS.sha256(e.get("source", ""))
+                    e["approved"] = True
+    rev["approved"] = True
+    return new, [], (f"已批准脚本检查「{chk.get('title') or cid}」" if zh else f"Approved the script check {chk.get('title') or cid!r}")
 
 
 def _device_key(topology: dict[str, Any]):

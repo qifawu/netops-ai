@@ -5,7 +5,7 @@ import { fill, useLang, useT, type DictKey } from "../lib/i18n";
 import { Btn, call } from "../lib/sopui";
 import Md from "../lib/Md";
 import Spark from "../lib/Spark";
-import { CheckPicker, DevicePicker, Hints, ScheduleChips, WidgetSummary, type Hint, type Selection, type Widget } from "./PlanWidgets";
+import { CheckPicker, DevicePicker, Hints, ScheduleChips, ScriptReview, WidgetSummary, type Hint, type Selection, type Widget } from "./PlanWidgets";
 import DryRunPanel, { useDryRun } from "./DryRunPanel";
 import HelpTip from "../lib/HelpTip";
 
@@ -564,7 +564,8 @@ function PlanBuilder({ mode, plan, seed, onClose, onSaved }: { mode: "new" | "ed
                 : i !== lastAssistant ? <WidgetSummary text="" expired />
                   : m.widget.type === "device_picker" ? <DevicePicker key={m.widget.id} w={m.widget} onSubmit={(sel, sum) => submitWidget(i, sel, sum)} />
                     : m.widget.type === "schedule_picker" ? <ScheduleChips key={m.widget.id} w={m.widget} label={(v) => schedText(t, v)} onSubmit={(sel, sum) => submitWidget(i, sel, sum)} />
-                      : <CheckPicker key={m.widget.id} w={m.widget} onSubmit={(sel, sum) => submitWidget(i, sel, sum)} />)}
+                      : m.widget.type === "script_review" ? <ScriptReview key={m.widget.id} w={m.widget} onSubmit={(sel, sum) => submitWidget(i, sel, sum)} />
+                        : <CheckPicker key={m.widget.id} w={m.widget} onSubmit={(sel, sum) => submitWidget(i, sel, sum)} />)}
               {(m.suggestions?.length ?? 0) > 0 && (
                 <div className="mt-2 space-y-1.5" data-testid="plan-suggestions">
                   {m.suggestions!.filter((s) => !declined.has(`${i}:${s.id}`)).map((s) => (
