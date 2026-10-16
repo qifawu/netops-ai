@@ -114,6 +114,19 @@ def _last_user(messages: list[dict[str, str]]) -> str:
     return next((m["content"] for m in reversed(messages or []) if m.get("role") == "user"), "")
 
 
+def _register_pending(review: dict[str, Any], plan_name: str, cid: str, item: dict[str, Any], goal: str, authored: dict[str, Any]) -> None:
+    """脚本写好后进脚本库的「待审」（留痕：需求原文 / 模型 / 自测摘要 / 哈希）。库写不了不影响对话，只是少一条留痕。"""
+    from netops_ai.inspection import script_registry as SR
+
+    try:
+        source = next(e["source"] for e in item["expect"] if e.get("type") == "script")
+        rec = SR.submit(SR.script_key(plan_name, cid), source, goal=goal, model=str(authored.get("model") or ""),
+                        self_test=authored.get("tests"))
+        review["registry"] = {"id": rec["script_id"], "version": rec["version"]}
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def build_graph(*, llm_factory: Callable[[], Any] | None = None,
                 topology_loader: Callable[[], dict[str, Any]] | None = None,
                 docs_db: Callable[[], str | Path | None] | None = None,
@@ -305,6 +318,7 @@ def build_graph(*, llm_factory: Callable[[], Any] | None = None,
             reviews[cid] = {"goal": goal, "explanation": authored.get("explanation", ""), "ok": bool(authored.get("ok")),
                             "tests": authored.get("tests"), "error": authored.get("error", ""), "rounds": authored.get("rounds", 1),
                             "sample_device": devs[0]["name"], "sample_head": "\n".join(sample.splitlines()[:30])}
+            _register_pending(reviews[cid], cand.get("name") or "", cid, item, goal, authored)
         return {"candidate": cand, "script_notes": notes}
 
     def respond(state: PlanState) -> dict:

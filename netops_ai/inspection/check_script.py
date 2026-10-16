@@ -33,7 +33,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-ALLOWED_MODULES = ("re", "json", "ipaddress", "collections", "datetime", "statistics", "math", "itertools")
+ALLOWED_MODULES = ("re", "json", "csv", "ipaddress", "collections", "datetime", "statistics", "math", "itertools")
 FORBIDDEN_NAMES = {"open", "eval", "exec", "compile", "__import__", "input", "breakpoint", "globals", "locals", "vars",
                    "getattr", "setattr", "delattr", "memoryview", "exit", "quit", "help", "dir"}
 #: `"{0.__class__.__mro__}".format(x)` 这类格式串属性遍历能绕过「禁止双下划线属性」的静态检查（信息泄露）：整个禁掉，

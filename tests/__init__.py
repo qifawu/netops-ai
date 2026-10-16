@@ -11,6 +11,9 @@ os.environ["TOKEN_LEDGER_PATH"] = os.path.join(_tmp, "ledger.jsonl")
 os.environ["NETOPS_COST_CONFIG"] = os.path.join(_tmp, "cost.yaml")
 os.environ["AUTH_DB"] = os.path.join(_tmp, "auth.db")
 os.environ.pop("NETOPS_AUTH", None)
+# 判定脚本的签名密钥和脚本库同理：测试不往 ~/.netops-ai 和真实 records/check-scripts 里写。
+os.environ["NETOPS_SCRIPT_KEY_FILE"] = os.path.join(_tmp, "script-signing-key")
+os.environ["NETOPS_SCRIPT_LIB_DIR"] = os.path.join(_tmp, "check-scripts")
 
 # **同一个坑，第二次。** 查出 `records/chat-traces/` 里有 117 个测试
 # 跑出来的假对话轨迹（问题都是「Gi0/1 怎么了」这类测试用例），混进了真实记录里，

@@ -105,7 +105,8 @@ def redact_secrets(text: str) -> str:
 def author_script(goal: str, command: str, sample: str, llm: Any, *, lang: str = "zh", max_rounds: int = MAX_ROUNDS) -> dict[str, Any]:
     """返回 {ok, source, sha256, explanation, tests, rounds, error}。ok = 通过静态检查、没崩、确定性、各用例合理。
     没写成时 ok=False，`source` 保留最后一版（可能为空）和 `tests`，给用户看卡在哪。"""
-    out: dict[str, Any] = {"ok": False, "source": "", "sha256": "", "explanation": "", "tests": None, "rounds": 0, "error": ""}
+    out: dict[str, Any] = {"ok": False, "source": "", "sha256": "", "explanation": "", "tests": None, "rounds": 0, "error": "",
+                           "model": str(getattr(llm, "model", "") or getattr(llm, "model_name", "") or "")}
     if llm is None:
         out["error"] = "no LLM client configured"
         return out

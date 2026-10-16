@@ -49,6 +49,13 @@ class TestScriptFlow(_Base):
 
         self._old = PC.SCRIPT_AUTHORING
         PC.SCRIPT_AUTHORING = True  # 总开关默认关；这里验证打开后的整条链路
+        import os
+        import tempfile
+
+        self._lib = tempfile.TemporaryDirectory()
+        self.addCleanup(self._lib.cleanup)
+        os.environ["NETOPS_SCRIPT_LIB_DIR"] = self._lib.name  # 脚本库留痕写进临时目录，不碰真实 records
+        self.addCleanup(os.environ.pop, "NETOPS_SCRIPT_LIB_DIR", None)
         self.addCleanup(setattr, PC, "SCRIPT_AUTHORING", self._old)
 
     def _conv(self, outputs, docs=None, sources=(DIFF_SCRIPT,), sample=SAMPLE):
@@ -100,6 +107,21 @@ class TestScriptFlow(_Base):
 
         self.assertEqual([p for p in CL.validate_checklist({"name": "p", "vendor": "cisco", "devices": r2["draft"]["devices"],
                                                             "checks": r2["draft"]["checks"]})], [])
+
+    def test_脚本库留痕_写好进待审_批准后同步成已批准_带批准人和需求原文(self):
+        from netops_ai.inspection import script_registry as SR
+
+        conv = self._conv([_out(script_requests=[_req()], checks=[], devices=["V1"], schedule={"every_minutes": 60, "daily_at": ""})])
+        r = self._turn(conv)
+        reg = r["draft"]["script_reviews"]["route-diff"]["registry"]
+        rec = SR.load(reg["id"], reg["version"])
+        self.assertEqual((rec["status"], rec["goal"]), ("pending", _req()["goal"]))
+        self.assertIsNone(SR.get_approved(reg["id"]))
+        conv.chat("s1", [{"role": "user", "content": "x"}], r["draft"], "zh",
+                  selection={"widget_id": r["widget"]["id"], "type": "script_review",
+                             "value": {"check_id": "route-diff", "action": "approve", "approver": "owner"}})
+        good = SR.get_approved(reg["id"])
+        self.assertEqual((good["status"], good["approved_by"]), ("approved", "owner"))
 
     def test_拒绝_脚本检查项拿掉_以后不再补回(self):
         conv = self._conv([_out(script_requests=[_req()], checks=[], devices=["V1"], schedule={"every_minutes": 60, "daily_at": ""})])

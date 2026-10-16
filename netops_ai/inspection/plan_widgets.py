@@ -200,6 +200,18 @@ def apply_selection(draft: dict[str, Any] | None, selection: dict[str, Any], top
     return base, [f"unknown selection type {kind!r}"], ""
 
 
+def _registry_event(review: dict[str, Any], action: str, who: str) -> None:
+    """批准 / 拒绝同步写进脚本库（谁、什么时候）。库里没有这条记录或写失败不挡住用户操作。"""
+    from netops_ai.inspection import script_registry as SR
+
+    reg = review.get("registry") or {}
+    try:
+        if reg.get("id"):
+            (SR.approve if action == "approve" else SR.reject)(reg["id"], int(reg["version"]), who)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _apply_script_review(base: dict[str, Any], value: dict[str, Any], lang: str) -> tuple[dict[str, Any], list[str], str]:
     """批准 / 拒绝一条判定脚本。批准要求自测通过（没通过的只能拒绝，或让助手改后再审）；批准时按源码重算 sha256。"""
     from netops_ai.inspection import check_script as CS
@@ -216,7 +228,7 @@ def _apply_script_review(base: dict[str, Any], value: dict[str, Any], lang: str)
     if action == "reject":
         prefs = PF.record_removed(PF.get(new), [chk])
         new["checks"] = [c for c in new["checks"] if c.get("id") != cid]
-        reviews.pop(cid, None)
+        _registry_event(reviews.pop(cid, None) or {}, "reject", str(value.get("approver") or "dashboard"))
         PF.put(new, prefs)
         return new, [], (f"已拒绝脚本检查「{chk.get('title') or cid}」" if zh else f"Rejected the script check {chk.get('title') or cid!r}")
     if action != "approve":
@@ -233,6 +245,7 @@ def _apply_script_review(base: dict[str, Any], value: dict[str, Any], lang: str)
                     e["signature"] = CS.sign(e.get("source", ""))
                     e["approved"] = True
     rev["approved"] = True
+    _registry_event(rev, "approve", str(value.get("approver") or "dashboard"))
     return new, [], (f"已批准脚本检查「{chk.get('title') or cid}」" if zh else f"Approved the script check {chk.get('title') or cid!r}")
 
 

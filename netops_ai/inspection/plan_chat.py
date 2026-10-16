@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any
 
@@ -128,7 +129,7 @@ def plan_json_schema() -> dict:
 
 #: 助手自己写判定脚本的能力总开关。关掉时：提示词里不提 script_requests、图里忽略模型给出的 script_requests，
 #: 需求模板和固定规则表达不了的就如实说做不到。代码和沙箱保留，打开此开关即恢复。
-SCRIPT_AUTHORING = False
+SCRIPT_AUTHORING = os.environ.get("NETOPS_SCRIPT_AUTHORING", "").strip().lower() in ("1", "true", "yes", "on")
 
 SYSTEM_PROMPT = """You help a network operator define a scheduled, READ-ONLY inspection plan through conversation.
 
