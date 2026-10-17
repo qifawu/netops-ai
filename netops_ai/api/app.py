@@ -105,6 +105,10 @@ from netops_ai.api.traffic_reports import router as _traffic_reports_router  # n
 
 app.include_router(_traffic_reports_router)  # 链路流量日报 / 周报 / 月报 PDF（现生成现下载）
 
+from netops_ai.api.outbox import router as _outbox_router  # noqa: E402
+
+app.include_router(_outbox_router)  # 对外发送草稿箱：列出 / 确认发送 / 丢弃
+
 
 @app.get("/api")
 def api_index() -> dict:

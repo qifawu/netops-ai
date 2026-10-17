@@ -1,0 +1,12 @@
+# 外网链路清单：翻滚（反复 up / down）时给运营商生成邮件草稿，见 netops_ai/inspection/isp_flap.py。
+# 复制到仓库根并改名 isp-links.yaml。下面全是示例值（文档保留地址 / example 域名）。
+- name: wan-primary            # 链路名（草稿去重用）
+  host: R1                     # Zabbix 里的主机名
+  interface: Gi0/1             # 和 Zabbix 监控项「Interface Gi0/1(): Operational status」一致
+  circuit_id: CN-BJ-000123     # 运营商的电路编号
+  isp: Example Telecom
+  email: [noc@isp.example]     # 收件人；发送时还必须在 OUTBOX_ALLOWED_RECIPIENTS 白名单里
+  threshold: 3                 # 窗口内 down 次数达到几次算翻滚
+  window_minutes: 60
+  cooldown_hours: 6            # 出过草稿后多久内不再出
+  signature: "Network Operations, Example Corp"
