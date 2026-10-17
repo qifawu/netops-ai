@@ -1,0 +1,6 @@
+# 软件版本目标清单：设备实际版本低于 target 就提醒（只核对，不自动升级），见 netops_ai/inspection/version_policy.py。
+# 复制到仓库根并改名 version-policy.yaml；target 由人定（参考厂商公告、CVE 报告、内部测试结论）。
+- devices: ["*"]          # 设备名列表，"*" = 其余所有设备（先匹配到的条目生效）
+  product: ios            # ios / ios_xe
+  target: "15.9(3)M9"
+  note: "示例：内部测试通过的版本"

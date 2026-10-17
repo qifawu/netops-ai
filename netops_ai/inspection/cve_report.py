@@ -252,10 +252,18 @@ def main() -> None:
 
     ap = argparse.ArgumentParser(description="设备软件版本 × CVE 报告")
     ap.add_argument("--out", default="reports")
+    ap.add_argument("--policy", default="version-policy.yaml", help="目标版本清单；文件存在才出「软件版本合规」一节")
     a = ap.parse_args()
     versions = collect_versions(topo.load_topology(), topo._default_adapter_factory)
     report = build_report(versions, Sources())
     blocks = to_blocks(report)
+    policy_path = Path(a.policy)
+    if policy_path.exists():
+        from netops_ai.inspection import version_policy as VP
+
+        rows = VP.evaluate(versions, VP.load_policy(policy_path))
+        counts = {r["device"]: len(r["cves"]) for r in report["devices"] if r.get("cves") is not None and not r.get("unknown") and "error" not in r}
+        blocks = VP.to_blocks(rows, counts) + blocks
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d")
