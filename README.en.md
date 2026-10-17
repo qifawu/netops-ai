@@ -37,6 +37,35 @@
 
 - **Inspect (before anything alerts).** Two checks, both decided by fixed rules rather than the model. *Trend inspection* reads only Zabbix history and runs three detectors: a sustained one-way trend (e.g. error counters climbing), a periodic spike, and a self-healing flap. *Status inspection* logs into each device read-only and checks interface up/up, OSPF neighbors all FULL, BGP sessions Established, and error-counter growth since the last run. Every finding quotes the device's own output. An optional model call then sorts findings into "handle tonight / ignore (with reason) / can't tell". Each run is stored so the page shows what is new or gone, and reports export to Markdown/HTML. Thresholds and scope live in `inspection.yaml`.
 
+## How confidence is derived
+
+Confidence (high / medium / low) is **not reported by the model**: asking a model to score its own conclusion gives a score
+produced by the same reasoning as the conclusion, which is the weakest signal. Code derives it from how the six hypothesis
+families were marked (`derive_confidence` in `netops_ai/analysis/schema.py`):
+
+| Condition | Confidence |
+|---|---|
+| Exactly one direction is "supported by evidence" and the other five are "ruled out" | High |
+| Exactly one direction is supported, but at least one other is neither ruled out nor supported (undetermined) | Medium |
+| No direction is supported; or two or more are supported at once; or every direction is ruled out | Low |
+
+Two downgrades also apply: if candidate root causes remain indistinguishable, High drops to Medium; if the conclusion carries no
+quotable evidence at all, High drops to Medium.
+
+**"Ruled out" has a bar**: it needs counter-evidence, and the counter-evidence has to hold — "no related record found" is not counter-evidence
+(not finding is not the same as not existing), and a fault that has already ended cannot be ruled out by the current state alone.
+Otherwise the direction can only count as undetermined. This requirement is part of the output schema and the model is expected to follow it; the open edition does not re-check it in code, the member edition does (see below).
+
+**What the level means, and what it does not**
+- It measures whether this investigation's conclusion is self-consistent and whether alternatives were properly excluded. It is **not a probability**
+  and has not been calibrated: "High" does not guarantee correctness.
+- The model still makes the per-direction call, so the evidence quotes are the ground truth — every piece of evidence carries the device's own output to check against.
+- At low confidence the system does not force an answer: it states which data is missing and which command would settle it, and flags the incident for a human.
+- Feishu card colors follow confidence.
+- The open edition only does the derivation above. The member edition adds a verbatim check of evidence quotes and business-rule checks
+  (e.g. "ruled out only because nothing was found", "quote not found in the input"); contradictions are listed under "More info" for a human to review but
+  **do not change the confidence automatically**.
+
 ## Tools
 
 **What the agent can call** — all read-only, registered in one place; the full list is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#the-tools-the-agent-can-use).

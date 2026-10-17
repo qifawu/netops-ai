@@ -66,3 +66,52 @@ def traffic_report_draft(kind: str, body: DraftRequest):
         return JSONResponse({"message": f"could not build the draft: {type(exc).__name__}: {str(exc)[:200]}"}, status_code=502)
     d = res["draft"]
     return {"id": d["id"], "status": d["status"], "subject": d["subject"], "ai_summary": d["meta"]["ai_summary"]}
+
+
+# --- 其它按需生成的报告（HTML，页面里点一下就在新标签页打开；会登录设备做只读采集，所以需要等十几秒到一分钟）---
+
+reports_router = APIRouter(prefix="/api/reports", tags=["reports"])
+
+
+def _topology_and_factory():
+    from netops_ai import topology as topo
+
+    return topo.load_topology(), topo._default_adapter_factory
+
+
+@reports_router.get("/cve")
+def cve_report():
+    """设备软件版本 × CVE：先 `show version`（只读）取版本，再查 NVD，对照 CISA KEV。慢（NVD 限速），结果有 24 小时缓存。"""
+    from fastapi.responses import HTMLResponse
+
+    from netops_ai.inspection import cve_report as CR
+    from netops_ai.inspection.export import blocks_to_html
+
+    try:
+        known, factory = _topology_and_factory()
+        report = CR.build_report(CR.collect_versions(known, factory), CR.Sources())
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"message": f"could not build the report: {type(exc).__name__}: {str(exc)[:200]}"}, status_code=502)
+    return HTMLResponse(blocks_to_html(CR.to_blocks(report), "设备软件版本漏洞报告", classify=None))
+
+
+@reports_router.get("/topology")
+def topology_report():
+    """拓扑自动发现：CDP / LLDP 邻居（只读）还原连线，对照已登记拓扑；图以内嵌 PNG 放在页面末尾。"""
+    import base64
+    import tempfile
+
+    from fastapi.responses import HTMLResponse
+
+    from netops_ai.inspection import topology_discovery as TD
+    from netops_ai.inspection.export import blocks_to_html
+
+    try:
+        known, factory = _topology_and_factory()
+        result = TD.build(TD.collect(known, factory), known)
+        with tempfile.TemporaryDirectory() as d:
+            png = base64.b64encode(TD.render_png(result, known, Path(d) / "t.png").read_bytes()).decode()
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"message": f"could not build the report: {type(exc).__name__}: {str(exc)[:200]}"}, status_code=502)
+    html = blocks_to_html(TD.to_blocks(result), "拓扑自动发现", classify=None)
+    return HTMLResponse(html.replace("</body>", f'<h2>拓扑图</h2><img alt="topology" style="max-width:100%" src="data:image/png;base64,{png}"></body>'))

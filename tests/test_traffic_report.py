@@ -190,5 +190,57 @@ class TestApi(unittest.TestCase):
                 API._zabbix, API.report_dir = old_z, old_d
 
 
+class TestHtmlReportsApi(unittest.TestCase):
+    """CVE / 拓扑发现按需生成的 HTML 报告接口：取不到数据 502，成功返回 HTML。设备和外部数据源都用假的。"""
+
+    def test_cve_成功返回html_失败502(self):
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from fastapi.testclient import TestClient
+
+        from netops_ai.api import traffic_reports as API
+        from netops_ai.api.app import app
+        from netops_ai.inspection import cve_report as CR
+
+        class Ad:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def run(self, cmd):
+                return SimpleNamespace(allowed=True, denial_reason="", error="", output="Cisco IOS Software, IOSv Software, Version 15.9(3)M9, RELEASE SOFTWARE")
+
+        def net(url, headers):
+            return (200, b'{"vulnerabilities": []}') if "cisa" in url else (200, b'{"resultsPerPage":0,"totalResults":0,"vulnerabilities":[]}')
+        import tempfile
+        from pathlib import Path
+
+        real = CR.Sources
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(API, "_topology_and_factory", lambda: ({"R1": 1}, lambda dev: Ad())),                 mock.patch.object(CR, "Sources", lambda: real(root=Path(d), fetch=net, api_key="")):
+            r = TestClient(app).get("/api/reports/cve")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIn("text/html", r.headers["content-type"])
+        self.assertIn("R1", r.text)
+        with mock.patch.object(API, "_topology_and_factory", lambda: (_ for _ in ()).throw(RuntimeError("no topology"))):
+            r = TestClient(app).get("/api/reports/cve")
+        self.assertEqual(r.status_code, 502)
+
+    def test_拓扑发现_失败502(self):
+        from unittest import mock
+
+        from fastapi.testclient import TestClient
+
+        from netops_ai.api import traffic_reports as API
+        from netops_ai.api.app import app
+
+        with mock.patch.object(API, "_topology_and_factory", lambda: (_ for _ in ()).throw(RuntimeError("no topology"))):
+            r = TestClient(app).get("/api/reports/topology")
+        self.assertEqual(r.status_code, 502)
+        self.assertIn("could not build", r.json()["message"])
+
+
 if __name__ == "__main__":
     unittest.main()

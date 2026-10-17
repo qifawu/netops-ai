@@ -6,6 +6,7 @@ import Inspection from "./pages/Inspection";
 import Topology from "./pages/Topology";
 import Audit from "./pages/Audit";
 import Knowledge from "./pages/Knowledge";
+import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 import { setMask, useMask } from "./lib/mask";
 import { LangContext, fill, loadStoredLang, storeLang, translate, useLang, useSetLang, useT, type DictKey, type Lang } from "./lib/i18n";
@@ -47,6 +48,7 @@ const ICON: Record<string, string> = {
   cost: "M12 3v18m4-14H10a3 3 0 0 0 0 6h4a3 3 0 0 1 0 6H8",
   users: "M16 11a3 3 0 1 0-6 0 3 3 0 0 0 6 0ZM5 20a7 7 0 0 1 14 0M19 8v4m2-2h-4",
   knowledge: "M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4Zm0 13a3 3 0 0 1 3-3h11M9 8h6",
+  reports: "M4 6h16v12H4V6Zm0 0 8 7 8-7",
   settings: "M12 3v3m0 12v3m9-9h-3M6 12H3m14.5-6.5-2 2m-9 9-2 2m0-13 2 2m9 9 2 2M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z",
 };
 
@@ -58,6 +60,7 @@ const NAV: { groupKey: DictKey; items: Item[] }[] = [
   { groupKey: "nav.group.ops", items: [
     { key: "incidents", labelKey: "nav.incidents", page: Incidents },
     { key: "inspection", labelKey: "nav.inspection", page: Inspection },
+    { key: "reports", labelKey: "nav.reports", page: Reports },
   ]},
   { groupKey: "nav.group.assets", items: [
     { key: "topology", labelKey: "nav.topology", page: Topology },

@@ -105,6 +105,10 @@ from netops_ai.api.traffic_reports import router as _traffic_reports_router  # n
 
 app.include_router(_traffic_reports_router)  # 链路流量日报 / 周报 / 月报 PDF（现生成现下载）
 
+from netops_ai.api.traffic_reports import reports_router as _reports_router  # noqa: E402
+
+app.include_router(_reports_router)  # CVE 报告 / 拓扑发现（HTML，按需生成）
+
 from netops_ai.api.outbox import router as _outbox_router  # noqa: E402
 
 app.include_router(_outbox_router)  # 对外发送草稿箱：列出 / 确认发送 / 丢弃
