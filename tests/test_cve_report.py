@@ -59,7 +59,7 @@ class TestVersion(unittest.TestCase):
         self.assertEqual(CR.parse_version(IOS), {"product": "ios", "version": "15.9(3)m9", "raw": "15.9(3)M9"})
         v = CR.parse_version(XE)
         self.assertEqual((v["product"], v["version"]), ("ios_xe", "17.3.4a"))
-        self.assertIsNone(CR.parse_version("Huawei VRP"))
+        self.assertIsNone(CR.parse_version("Some Other Vendor OS 1.0"))
         self.assertIsNone(CR.parse_version(""))
 
     def test_CPE拼写_括号转义(self):
