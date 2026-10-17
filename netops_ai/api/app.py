@@ -101,6 +101,10 @@ from netops_ai.api.plans import router as _plans_router  # noqa: E402
 
 app.include_router(_plans_router)  # 巡检计划：对话制定 / 保存 / 启停 / 立即运行 / 历史 / 趋势
 
+from netops_ai.api.traffic_reports import router as _traffic_reports_router  # noqa: E402
+
+app.include_router(_traffic_reports_router)  # 链路流量日报 / 周报 / 月报 PDF（现生成现下载）
+
 
 @app.get("/api")
 def api_index() -> dict:
