@@ -153,19 +153,21 @@ TEMPLATES: dict[str, dict[str, Any]] = {
     },
     "route_table_diff": {
         "title": {"zh": "路由表明细对比", "en": "Routing table detail diff"},
-        "what": {"zh": "整张路由表逐条跟上一次巡检比：列出新增 / 消失的路由（等价多路径逐条算），有变化就报警；首次运行只记录基线",
-                 "en": "The whole routing table compared entry by entry with the previous run: routes (and ECMP paths) that appeared or "
-                       "disappeared; any change alerts. The first run only records a baseline"},
+        "what": {"zh": "整张路由表按前缀跟上一次巡检比：新增 / 消失的路由，以及路由内容变了（下一跳、出接口、协议、metric、等价多路径少了一条），有变化就报警；首次运行只记录基线",
+                 "en": "The whole routing table compared prefix by prefix with the previous run: routes that appeared or disappeared, and routes whose content changed "
+                       "(next hop, interface, protocol, metric, a lost ECMP path); any change alerts. The first run only records a baseline"},
         "kind": "state", "roles": [],
         "check": {
             # begin Gateway：跳过开头那段固定的代码说明；每次都一样的命令，输出顺序稳定
             "command": "show ip route | begin Gateway",
-            # 解析成路由表（vrf / 前缀 / 下一跳 / 出接口为 key；协议 / 管理距离 / metric 变了也报）按行对表；
+            # 解析成路由表，按前缀对表（下一跳 / 出接口 / 协议 / 管理距离 / metric 任一变了都报）；
             # 解析不了（没有这个平台的模板、输出格式变了）退回下面这组逐行文本对比，不会静默放过
             "expect": [{"type": "table_diff_vs_previous", "severity": "critical", "max_added": 0, "max_removed": 0,
                         "max_changed": 0, "fallback": "text",
-                        "key": ["vrf", "network", "prefix_length", "nexthop_ip", "nexthop_if"],
-                        "compare": ["protocol", "type", "distance", "metric"],
+                        # 一条「路由条目」= vrf + 前缀；下一跳 / 出接口 / 协议 / 管理距离 / metric 是它的内容，
+                        # 等价多路径丢一条、换了下一跳都是「这条路由变了」，一个前缀报一行，不拆成一堆增删
+                        "key": ["vrf", "network", "prefix_length"],
+                        "compare": ["protocol", "type", "distance", "metric", "nexthop_ip", "nexthop_if"],
                         # 「is variably subnetted, N subnets」这种汇总行里的数字随路由增减变，不是路由本身
                         "ignore_regex": [r"is (?:variably )?subnetted"],
                         # 路由老化时间（01:50:02 / 1d02h / 2w3d）每次都变，剪掉

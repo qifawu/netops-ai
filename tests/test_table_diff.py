@@ -79,6 +79,16 @@ class TestTableDiff(unittest.TestCase):
         self.assertEqual((r[1]["changed"], r[1]["added"], r[1]["removed"], r[1]["passed"]), (1, 0, 0, False))
         self.assertIn("metric: 2 -> 9", r[1]["changed_sample"][0])
 
+    def test_模板按前缀对表_等价多路径少一条_算这条路由变了而不是拆成增删(self):
+        from netops_ai.inspection import plans as P
+
+        rule = P.TEMPLATES["route_table_diff"]["check"]["expect"][0]
+        lost = ROUTES.replace("                     [110/2] via 198.51.100.6, 00:10:21, GigabitEthernet0/2" + NL, "")
+        r = run(rule, "show ip route | begin Gateway", [ROUTES, lost])
+        self.assertEqual((r[1]["added"], r[1]["removed"], r[1]["changed"]), (0, 0, 1))
+        self.assertIn("203.0.113.0", r[1]["changed_sample"][0])
+        self.assertIn("nexthop_ip=198.51.100.6", r[1]["changed_sample"][0])
+
     def test_新增和消失(self):
         gone = ROUTES.replace("S        192.0.2.0/24 [1/0] via 198.51.100.2", "S        203.0.113.128/25 [1/0] via 198.51.100.2")
         r = run(self.rule(), "show ip route", [ROUTES, gone])

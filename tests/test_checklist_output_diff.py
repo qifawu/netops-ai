@@ -102,8 +102,8 @@ class TestOutputDiff(unittest.TestCase):
     def test_等价多路径丢了一条路径_看得出来(self):
         r = run_seq(rule(), [TABLE_A, TABLE_ONE_PATH_LOST])
         e = ev(r[1])
-        self.assertEqual(e["removed"], 1, e)
-        self.assertTrue(any("192.0.2.6" in x for x in e["removed_sample"]))
+        self.assertEqual((e["removed"], e["changed"]), (0, 1), e)  # 按前缀对表：少了一条路径 = 这条路由变了
+        self.assertTrue(any("192.0.2.6" in x for x in e["changed_sample"]))
 
     def test_设备不可达或命令被拒_不覆盖基线(self):
         r = run_seq(rule(), [TABLE_A, None, "deny", TABLE_MINUS])
