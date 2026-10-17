@@ -136,6 +136,31 @@ class TestIspFlap(Base):
         self.assertIn("Down events: 3", d["body"])
         self.assertIn("down", d["body"])
 
+    def test_设备日志里的闪断_采样看不见也能抓到(self):
+        def line(m, state, extra=""):
+            at = NOW + timedelta(minutes=m)
+            return {"clock": str(int(at.timestamp()) + 5), "value": f"{at:%b %d %H:%M:%S} 192.0.2.1 17: *{at:%b %d %H:%M:%S}.000: "
+                    f"%LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/1, changed state to {state}"}
+
+        class LogZbx(FlapZbx):
+            def list_items(self, host_id):
+                return super().list_items(host_id) + [{"itemid": "77", "name": "Syslog from 192.0.2.1", "status": "0", "value_type": "2"}]
+
+            def get_history(self, item_id, *, history_type=0, time_from=None, time_till=None, limit=100):
+                if item_id == "77":
+                    return [line(-50, "down"), line(-49, "up"), line(-30, "down"), line(-29, "up"), line(-10, "down"), line(-9, "up"),
+                            {"clock": "1", "value": "Oct 17 00:00:00 x: %LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/2, changed state to down"}]
+                return [{"clock": str(int((NOW + timedelta(minutes=m)).timestamp())), "value": "1"} for m in (-55, -20, -2)]  # 采样一直是 up
+        det = ISP.detect(LogZbx([]), LINK, NOW)
+        self.assertEqual((det["flaps"], det["source"]), (3, "device log (LINEPROTO-UPDOWN)"))  # 别的接口（Gi0/2）的日志不算
+        self.assertEqual(ISP._canon("GigabitEthernet 0/1"), ISP._canon("Gi0/1"))
+
+    def test_时钟偏差_事件比现在还晚几分钟也算_窗口结束时间不早于事件(self):
+        series = [(-30, 1), (-20, 2), (-10, 1), (+2, 2), (+3, 1)]  # 后面两个事件在「现在」之后（Zabbix 服务器时钟超前）
+        det = ISP.detect(FlapZbx(series), LINK, NOW)
+        self.assertEqual(det["flaps"], 2)
+        self.assertGreaterEqual(det["end"], det["events"][-1][0])
+
     def test_没到阈值_不出草稿(self):
         res = ISP.check_links(FlapZbx([(-30, 1), (-20, 2), (-10, 1)]), [LINK], now=NOW, root=self.root)
         self.assertEqual(res[0]["action"], "ok")

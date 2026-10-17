@@ -31,6 +31,8 @@ from typing import Any
 from netops_ai import outbox
 
 UP = 1
+#: 跑检测的机器和 Zabbix 服务器的时钟可能差几分钟（实测差过 4 分钟）：取数的上沿放宽这么多，别把「刚发生」的事件当成未来丢掉
+SKEW = timedelta(minutes=10)
 
 
 def load_links(path: Path) -> list[dict[str, Any]]:
@@ -62,25 +64,73 @@ def _status_item(zbx: Any, host: str, iface: str) -> str | None:
     return None
 
 
+_SHORT = (("tengigabitethernet", "te"), ("gigabitethernet", "gi"), ("fastethernet", "fa"), ("port-channel", "po"), ("loopback", "lo"),
+          ("ethernet", "eth"), ("serial", "se"), ("vlan", "vl"))
+_UPDOWN_RE = re.compile(r"%LINEPROTO-\d-UPDOWN: Line protocol on Interface (?P<iface>\S+), changed state to (?P<state>up|down)")
+
+
+def _canon(name: str) -> str:
+    """接口名规整：Gi0/1 / GigabitEthernet0/1 / gigabitethernet 0/1 落到同一个写法。"""
+    n = re.sub(r"\s+", "", name.lower())
+    for long, short in _SHORT:
+        if n.startswith(long):
+            return short + n[len(long):]
+    return n
+
+
+def _syslog_events(zbx: Any, host: str, iface: str, start: datetime, now: datetime) -> list[tuple[datetime, str]]:
+    """设备日志里这个接口的 `LINEPROTO-UPDOWN`（线路协议 up / down）事件。比定时采样准：几十秒的闪断采样看不见，日志每次都记。
+    时间取转发前缀里的采集时间（比 Zabbix 入库时间准：补发的日志会同一秒入库）。没有日志监控项就返回空。"""
+    from netops_ai.zabbix.client import parse_line_receive_time
+
+    want, events = _canon(iface), []
+    for h in zbx.list_hosts():
+        if (h.get("host") or h.get("name")) != host:
+            continue
+        for it in zbx.list_items(h["hostid"]):
+            if str(it.get("value_type")) != "2" or str(it.get("status", "0")) != "0":
+                continue
+            rows = zbx.get_history(it["itemid"], history_type=2, time_from=int(start.timestamp()) - 120, time_till=int((now + SKEW).timestamp()), limit=2000)
+            for r in rows:
+                m = _UPDOWN_RE.search(str(r.get("value") or ""))
+                if not m or _canon(m["iface"]) != want:
+                    continue
+                clock = int(r["clock"])
+                at = parse_line_receive_time(str(r["value"]), clock) or clock
+                if int(start.timestamp()) <= at <= int((now + SKEW).timestamp()):
+                    events.append((datetime.fromtimestamp(at, timezone.utc), m["state"]))
+    events.sort()
+    return events
+
+
 def detect(zbx: Any, link: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
-    """返回 {flaps, events, window, item_found, enough_data}。events = [(时间, "down"|"up")]，按时间升序。"""
+    """返回 {flaps, events, start, end, item_found, points, source}。events = [(时间, "down"|"up")]，按时间升序。
+    两个证据源：设备日志里的线路协议 up / down（准，抓得到闪断）、Zabbix 的接口状态历史（采样）。取 down 次数多的那个。"""
     now = now or datetime.now(timezone.utc)
     start = now - timedelta(minutes=int(link["window_minutes"]))
     item = _status_item(zbx, link["host"], link["interface"])
-    out: dict[str, Any] = {"flaps": 0, "events": [], "start": start, "end": now, "item_found": item is not None, "points": 0}
-    if item is None:
-        return out
-    rows = zbx.get_history(item, history_type=3, time_from=int(start.timestamp()), time_till=int(now.timestamp()), limit=2000)
-    pts = sorted((int(r["clock"]), int(float(r["value"]))) for r in rows)
-    out["points"] = len(pts)
-    prev = None
-    for clock, val in pts:
-        if prev is not None and prev == UP and val != UP:
-            out["flaps"] += 1
-            out["events"].append((datetime.fromtimestamp(clock, timezone.utc), "down"))
-        elif prev is not None and prev != UP and val == UP:
-            out["events"].append((datetime.fromtimestamp(clock, timezone.utc), "up"))
-        prev = val
+    out: dict[str, Any] = {"flaps": 0, "events": [], "start": start, "end": now, "item_found": item is not None, "points": 0, "source": ""}
+    sampled: list[tuple[datetime, str]] = []
+    if item is not None:
+        rows = zbx.get_history(item, history_type=3, time_from=int(start.timestamp()), time_till=int((now + SKEW).timestamp()), limit=2000)
+        pts = sorted((int(r["clock"]), int(float(r["value"]))) for r in rows)
+        out["points"] = len(pts)
+        prev = None
+        for clock, val in pts:
+            if prev is not None and prev == UP and val != UP:
+                sampled.append((datetime.fromtimestamp(clock, timezone.utc), "down"))
+            elif prev is not None and prev != UP and val == UP:
+                sampled.append((datetime.fromtimestamp(clock, timezone.utc), "up"))
+            prev = val
+    logged = _syslog_events(zbx, link["host"], link["interface"], start, now)
+    downs = lambda ev: sum(1 for _, s in ev if s == "down")  # noqa: E731
+    if downs(logged) > downs(sampled):
+        out.update(events=logged, flaps=downs(logged), source="device log (LINEPROTO-UPDOWN)", item_found=True)
+    else:
+        out.update(events=sampled, flaps=downs(sampled), source="Zabbix interface status history")
+    out["item_found"] = item is not None or bool(logged)
+    if out["events"]:  # 时钟有偏差时事件可能晚于「现在」：邮件里窗口的结束时间别比事件还早
+        out["end"] = max(out["end"], out["events"][-1][0])
     return out
 
 
