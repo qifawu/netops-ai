@@ -17,6 +17,7 @@ os.environ["NETOPS_SCRIPT_LIB_DIR"] = os.path.join(_tmp, "check-scripts")
 # 草稿箱和报告目录同理：测试不往真实 records/outbox、records/reports 里写。
 os.environ["NETOPS_OUTBOX_DIR"] = os.path.join(_tmp, "outbox")
 os.environ["NETOPS_REPORT_DIR"] = os.path.join(_tmp, "reports")
+os.environ["NETOPS_CVE_CACHE_DIR"] = os.path.join(_tmp, "cve-cache")
 
 # **同一个坑，第二次。** 查出 `records/chat-traces/` 里有 117 个测试
 # 跑出来的假对话轨迹（问题都是「Gi0/1 怎么了」这类测试用例），混进了真实记录里，
