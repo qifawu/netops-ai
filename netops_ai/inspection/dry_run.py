@@ -58,7 +58,7 @@ def _run_one(adapter: Any, check: dict[str, Any], dev: str, hist: CL.MetricHisto
         return item
     for x in check.get("extract") or []:
         item["metrics"][x["name"]] = CL._extract(x, out)
-    item["evaluations"] = CL.evaluate_expectations(check, out, item["metrics"], dev, hist, vendor)
+    item["evaluations"] = CL.evaluate_expectations(check, out, item["metrics"], dev, hist, vendor, dry=True)
     item["would_pass"] = not any(r.get("passed") is False for r in item["evaluations"])
     return item
 

@@ -475,7 +475,7 @@ def evaluate_table_rule(e: dict[str, Any], output: str, truncated: bool, dev: st
 
 
 def evaluate_expectations(check: dict[str, Any], output: str, metrics: dict[str, Any], dev: str,
-                          hist: MetricHistory, vendor: str = "cisco") -> list[dict[str, Any]]:
+                          hist: MetricHistory, vendor: str = "cisco", dry: bool = False) -> list[dict[str, Any]]:
     """一条检查项的全部判定（正式运行和试运行共用）。明细对比只看存得下的那部分（cap_diff_output）。"""
     evals = []
     diff_text, diff_trunc = cap_diff_output(output)
