@@ -17,9 +17,13 @@
 - **Playbooks (SOP).** YAML advice for the agent, with a linter; six examples: interface down, OSPF adjacency, BGP session, device restart, high CPU, interface errors.
 - **Custom inspections, defined by conversation.** Define your own inspection in the dashboard by talking to an assistant (optionally starting from the basic inspection): what you care about, which devices, how often. The assistant proposes checks and a schedule, and looks commands up in the command catalog and the document library when you do not remember them. New plans and changes to existing ones go through the same flow. **The commands, the target machines and the schedule must each be confirmed before the plan is saved and enabled**; plans can be paused, rescheduled and deleted, every run is stored, and trend analysis and report export are available.
 - **Basic inspection.** The default health check: trend detectors on Zabbix history and live read-only status checks (interfaces, OSPF, BGP, error counters), all judged by fixed rules; the page explains what each check looks at, how it is judged and which command it runs, and lets you change its schedule; history, diff against the previous run, Markdown/HTML export.
+- **Generic table-vs-table comparison.** Routing table, ARP, OSPF neighbors, interface state and so on: command output is parsed into rows with TextFSM (the community ntc-templates library), matched by key fields, and added / removed / changed rows are reported (e.g. a route's `metric 2→3`, a changed next hop); volatile fields (uptime, age) are ignored by default. The same rule serves any command — it is not one hand-written parser per command.
+- **Assistant-written judgement scripts (optional, off by default).** For judgements templates and generic rules cannot express (e.g. "interface input errors grew by more than 50 since last run"), the assistant writes a small script from a real device output sample, self-tests it in a restricted sandbox, and it is **enabled only after the user reviews and approves the source**. A script only reads the output it is given and returns a fixed-shape verdict; it cannot reach the network or files, and cannot trigger any device or alert action. Enable with `NETOPS_SCRIPT_AUTHORING=1`; the safety boundary is in [docs/SCRIPT-SANDBOX.md](docs/SCRIPT-SANDBOX.md).
+- **Reports and outbound messages.** Link traffic daily / weekly / monthly reports (Zabbix hourly trends, PDF, with utilization, period-over-period change, top interfaces and charts); a management summary; an email to the ISP when an external link flaps; a reminder when software versions fall behind. **The system only writes drafts; a person approves each one on the dashboard's "Reports & Outbox" page before anything is sent**, and email recipients must be on an allowlist. Jobs run from the system scheduler — see [docs/SCHEDULING.md](docs/SCHEDULING.md).
+- **More read-only reports.** Software version × CVE (public NVD data, cross-checked against CISA's known-exploited list); CDP / LLDP topology discovery (diff and diagram against the registered topology, advisory only); software version compliance (you maintain target versions, the system checks who is behind — it never upgrades).
 - **Investigation trace and command audit.** Every step of an incident's investigation is recorded (tool, arguments, result); the audit page lists every command the agent ran and every command the whitelist refused.
 - **Local documentation search (knowledge base).** Keyword (BM25) search over your own documents, used by the agent's `doc_search` tool, the knowledge-base page and the inspection planner's command lookup. The index ships empty; build it with `tools/kb_ingest.py`. Results are labelled as documentation, never as device evidence.
-- **Dashboard.** Chinese and English: overview, incidents, topology, inspection, audit, knowledge base, settings. A demo mode masks IP addresses and IDs.
+- **Dashboard.** Chinese and English: overview, incidents, topology, inspection, reports & outbox, audit, knowledge base, settings. A demo mode masks IP addresses and IDs.
 - **Demo scripts.** `tools/demo_replay.py` and `tools/seed_demo.py` populate the dashboard without a lab.
 
 ## How it works
@@ -125,6 +129,10 @@ Fault injected: `neighbor 10.0.0.2 shutdown` on V1. Six alerts arrived from both
 **Basic inspection**: the default trend findings plus read-only status checks of every device:
 
 <p align="center"><img src="docs/images/ui-inspection.png" alt="Inspection" width="900"></p>
+
+**Reports & Outbox**: traffic reports, CVE and topology-discovery reports, management-summary drafts; every draft in the outbox needs a person's approval before anything is sent (the drafts in the screenshot are examples with reserved domains):
+
+<p align="center"><img src="docs/images/ui-reports-en.png" alt="Reports and outbox" width="900"></p>
 
 **Knowledge base** (Chinese UI; the dashboard also has an English UI):
 
