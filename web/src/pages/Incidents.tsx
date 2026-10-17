@@ -350,6 +350,31 @@ function Detail({ id, onPick, onDevice }: { id: string; onPick: (id: string) => 
         </div>
       </Card>
 
+      {/* 研判摘要：这件事是什么方向、波及哪里、要不要人处理、多少条告警收敛成了这一个事件。只放数据，不放说明文字。 */}
+      <Card className="grid grid-cols-2 divide-line xl:grid-cols-4 xl:divide-x">
+        {(() => {
+          const supported = checks.filter(([, v]) => /支持|成立|确认|supported/i.test(String(v.status))).map(([k]) => (CHECK_KEY[k] ? t(CHECK_KEY[k]) : k));
+          const devs = cur.devices?.length ? cur.devices : [cur.host];
+          const cell = (label: string, body: ReactNode, sub?: ReactNode) => (
+            <div className="min-w-0 px-5 py-4">
+              <div className="text-xs text-slate-500">{label}</div>
+              <div className="mt-1 text-sm leading-snug font-semibold text-slate-900">{body}</div>
+              {sub && <div className="mt-0.5 text-xs text-slate-500">{sub}</div>}
+            </div>
+          );
+          return (
+            <>
+              {cell(t("hist.judge.nature"), supported.length ? supported.join("、") : <span className="text-slate-400">{t("hist.judge.undetermined")}</span>)}
+              {cell(t("hist.judge.scope"), fill(t("hist.judge.scopeDevices"), { n: devs.length }),
+                (cur.related ?? []).length > 0 ? fill(t("hist.judge.scopeRelated"), { n: cur.related.length }) : devs.join("、"))}
+              {cell(t("hist.judge.action"), <span className={cur.needs_human ? "text-rose-600" : "text-emerald-600"}>{t(cur.needs_human ? "hist.judge.needsHuman" : "hist.judge.noIntervention")}</span>)}
+              {cell(t("hist.judge.converge"), fill(t("hist.judge.convergeValue"), { n: cur.alert_count }),
+                (cur.repeat_count ?? 0) > 1 ? fill(t("incidents.repeatBadge"), { n: cur.repeat_count! }) : undefined)}
+            </>
+          );
+        })()}
+      </Card>
+
       <Card className="overflow-hidden">
         {/* 页签：窄屏横向滚动，不折行。数字角标只是数量，不上色。 */}
         <div className="flex gap-6 overflow-x-auto border-b border-line px-6" role="tablist">
